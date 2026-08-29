@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Chay: ./blcheck run
+#
+# May Windows nay co 2 ban Python. Ban trong PATH la Python310 - KHONG co
+# typer/rich/httpx nen chay se loi ModuleNotFoundError. Bo chi thang vao
+# Python311. Doi may / cai lai Python thi sua dong BLCHECK_PY duoi day.
+
+BLCHECK_PY="/c/Program Files/Python311/python.exe"
+
+# Khong thay ban da chi dinh -> quay ve 'python' trong PATH.
+[ -x "$BLCHECK_PY" ] || BLCHECK_PY="python"
+
+exec "$BLCHECK_PY" "$(dirname "$0")/src/cli.py" "$@"

@@ -1,0 +1,201 @@
+# =====================================================================
+# CAU HINH KIEM TRA BACKLINK
+# Du an dang chay: huthamcautienphat.com
+#
+# Doi sang du an khac: sua muc 'site' + 'source' + tu khoa 'match' cua
+# tung tier ben duoi. Khong can dong vao code trong src/.
+# Xem config/_mau.yaml de biet y nghia day du tung muc.
+# =====================================================================
+
+site:
+  name: huthamcautienphat
+  money_domain: huthamcautienphat.com
+
+  # URL dich cu the. Link tro dung mot trong cac URL nay = khop chinh xac.
+  # Tro dung domain nhung sai URL -> van tinh FOUND nhung bi gan ma SAI_URL_DICH.
+  target_urls:
+    - https://huthamcautienphat.com/dich-vu-hut-ham-cau
+    - https://huthamcautienphat.com/hut-ham-cau-tai-tp-hcm-binh-duong
+    - https://huthamcautienphat.com/dich-vu-nao-vet-ho-gas-tai-binh-duong
+
+  # Cac domain khac cung thuoc so huu (domain phu, rut gon rieng, ban .vn...).
+  # Link tro ve day cung duoc tinh la tro ve money site.
+  extra_domains: []
+
+source:
+  # >>> DAN LINK GOOGLE SHEET / GOOGLE DOCS VAO DONG 'url' NGAY DUOI DAY <<<
+  #
+  # Dan nguyen link tren thanh dia chi trinh duyet, khong can cat bot phan
+  # /edit?gid=... o cuoi. Vi du:
+  #   url: "https://docs.google.com/spreadsheets/d/1AbC...XyZ/edit#gid=0"
+  #
+  # BAT BUOC: mo file do > Share > General access > "Anyone with the link"
+  # > Viewer. Neu khong, Google tra 403 va script se bao dung loi do.
+  #
+  # Sau khi dan xong, chay 2 lenh nay:
+  #   python src/ingest.py -c config/checkbacklink.yaml --dry-run
+  #   python src/ingest.py -c config/checkbacklink.yaml
+  #
+  # type: auto = tu nhan dien tu link da dan (sheet hay docs).
+  #   Cac gia tri khac: google_sheet | google_doc | xlsx | csv | local
+  #   De url rong -> tool doc thang file 'master_csv' co san trong may.
+  type: auto
+  url: "https://docs.google.com/spreadsheets/d/1Mofu08iVDPfPMUl6ihX7hBxawwdA1i_sWrWqFh6Ne78/edit?gid=1202363611#gid=1202363611"
+
+  # Chi dung khi lay tu file trong may thay vi tu Google (vd: data/goc.xlsx)
+  file: ""
+
+  # File sach sau khi loc. Day la file ma checker doc vao de chay.
+  # master_csv: data/backlinks_master.csv
+
+# ---------------------------------------------------------------------
+# Cau truc kim tu thap. Them/bot tier tuy y - tool khong gioi han 4 tang.
+#   targets: money   -> tang nay tro thang ve money site
+#   targets: tier:N  -> tang nay tro ve tap URL cua tier N
+#   match:           -> tu khoa nhan dien ten tab trong Google Sheet (khong dau
+#                       hoa thuong, khop kieu "chua chuoi con")
+#   priority:        -> 1 = quan trong nhat. Anh huong toi muc do to mau:
+#                       priority 1 nang muc canh bao len mot bac,
+#                       priority >= 4 ha xuong mot bac.
+# ---------------------------------------------------------------------
+tiers:
+  1:
+    label: "Tier 1 - tro thang money site"
+    targets: money
+    priority: 2
+    match:
+      - "backlink domain dr cao"
+      - "url con"
+      - "link page rank cao"
+      - "tier 1"
+      - "tang 1"
+    note: >
+      Ten la "DR cao" nhung phan lon la link profile tren job board va site Wix
+      nuoc ngoai (username chung tienphathc). Chi khoang 12 link dau la bai dang
+      that tren dien dan Viet Nam.
+
+  2:
+    label: "Tier 2 - web 2.0 tro thang money site"
+    targets: money
+    priority: 1 # nho nhat nhung quan trong nhat: ca tier 3 va 4 do vao day
+    match:
+      - "web 2.0"
+      - "link bai viet tren blog"
+      - "link bài viết trên blog"
+      - "tier 2"
+      - "tang 2"
+    note: >
+      Sheet "web 2.0" (10 URL) la tap con cua "Link bai viet tren Blog" (30 URL).
+      Thuc chat chi co 30 ve tinh tier 2. Mat 1 URL o day la mat ca mot nhanh lon.
+
+  3:
+    label: "Tier 3 - tro ve tier 2"
+    # Thuc te do duoc: nhom directory listing tro THANG money site, nhom blog
+    # Web2.0 tro sang directory listing (cung nam trong tier 3). Khai ca ba dich
+    # de tool doi chieu dung; cot "Khop tang" trong file ket qua se noi ro tung
+    # link roi vao dau. Dich dau tien la dich KY VONG - lech khoi no thi tool
+    # gan ma TRO_SAI_TANG (link van con, khong phai link hong).
+    targets: ["tier:2", money, "tier:3"]
+    priority: 4
+    match:
+      - "submiss web 2.0"
+      - "social bookmarks da cao"
+      - "profile_submissions"
+      - "profile_blog comments"
+      - "tang 3"
+      - "tier 3"
+
+  4:
+    label: "Tier 4 - tro ve tier 3"
+    targets: ["tier:3", "tier:2", money]
+    priority: 4
+    match:
+      - "tang 4_blog comment"
+      - "tang 4_bookmarks"
+      - "tang 4"
+      - "tier 4"
+
+# ---------------------------------------------------------------------
+network:
+  concurrency: 8 # so request song song. 15-20 neu mang khoe, de bi ban IP hon
+  per_domain_delay: 1.5 # giay nghi giua 2 request cung mot domain. KHONG ha duoi 1.0
+  timeout: 25
+  retries: 1 # so lan thu lai khi timeout / loi ket noi
+  verify_ssl: false # nhieu site ve tinh co chung chi het han
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+js:
+  # Bo trong: tool tu quyet dinh. Luot 1 doc HTML tho cho toan bo danh sach
+  # (nhanh), luot 2 chi mo Chromium cho nhung link chua doc duoc noi dung that.
+  # Chi dien vao day khi muon ep mot tier LUON render, vi du: auto_tiers: [2]
+  auto_tiers: []
+
+  # Bat/tat co che hai luot. De true. Dat false = quay ve cach cu.
+  escalate: true
+  # Domain bat buoc render JS du chay tier nao - noi dung sinh bang JavaScript,
+  # khong render se nhan hang loat NOT_FOUND gia.
+  force_domains:
+    # Tang 2 - bat buoc render, day la tang quan trong nhat
+    - "penzu.com"
+    - "notion.site"
+    - "share.evernote.com"
+    - "ofuse.me"
+    - "notebook.ai"
+    - "jimdosite.com"
+    - "wakelet.com"
+    - "pearltrees.com"
+    - "speakerdeck.com"
+    - ".mn.co"
+    # Cac nen tang blog sinh noi dung bang JavaScript
+    - ".thezenweb.com"
+    - ".bloguetechno.com"
+    - ".ampblogs.com"
+    - "mediajx.com"
+    - ".tblogz.com"
+    - ".blogzet.com"
+    - ".actoblog.com"
+    - ".blogolenta.com"
+  # domcontentloaded, KHONG phai networkidle: trang co polling (mn.co, penzu)
+  # khong bao gio "idle" nen networkidle luon timeout va lam hong buoc render.
+  wait_until: domcontentloaded
+  # Cho them bao nhieu mili giay sau khi DOM san sang, de JS kip ve noi dung.
+  wait_after: 6000
+  # Notion, Evernote nap rat cham - 40s khong du, hay gap CHUA_RENDER_DUOC.
+  timeout: 60000
+
+ingest:
+  # Tab trong Google Sheet chua tu khoa nay se bi bo qua hoan toan.
+  drop_sheets:
+    - "sheet1" # du lieu rac cua du an khac
+    - "huong dan"
+    - "note"
+    - "template"
+  # Bo luon nhung domain khong bao gio dang lam backlink.
+  drop_domains:
+    - "google.com/url"
+    - "docs.google.com"
+    - "youtube.com/watch"
+  # Tab co nhieu cot URL thi khai bao ro lay cot nao, neu khong ingest se hot
+  # ca cot phu (cot "Ten Mien" chi la trang chu, khong phai cho dat backlink).
+  # Khoa la tu khoa trong ten tab, gia tri la ten cot o dong tieu de.
+  # So khop khong phan biet hoa thuong va khong phan biet dau tieng Viet.
+  sheet_columns:
+    "link page rank cao": ["link dat"]     # bo cot "Ten Mien"
+    # Tab "Social Bookmarks DA cao tang 3" co 2 cot URL nhung CA HAI deu la
+    # backlink that, nen khong khai bao o day - de ingest quet ca hai cot.
+
+  dedupe: true
+  strip_tracking: true
+  min_url_length: 12
+
+  # In canh bao khi gap URL chi co ten mien, khong co duong dan.
+  warn_homepage_urls: true
+
+thresholds:
+  # Trang co nhieu hon so link ra ngoai nay bi gan ma TRANG_NHIEU_LINK_RA.
+  outbound_link_limit: 150
+
+output:
+  dir: results
+  formats: [csv, xlsx]
+  filename: "{date}_{site}_tier{tier}"
