@@ -303,7 +303,7 @@ def verdict_panel(results):
               "[dim]khong can mo tay - trong do %d link hoan hao[/dim]" % d["HOAN_HAO"])
     t.add_row("[bold red]Link mat[/bold red]", "[bold red]%d[/bold red]"
               % d[D.V_MAT], "%.1f%%" % pc(d[D.V_MAT]),
-              "[dim]khong can mo tay - thay bang nguon moi[/dim]")
+              "[dim]khong can mo tay - gom ca trang noindex - thay nguon moi[/dim]")
     t.add_row("[bold yellow]Phai check tay[/bold yellow]",
               "[bold yellow]%d[/bold yellow]" % d[D.V_CHECK],
               "%.1f%%" % pc(d[D.V_CHECK]),

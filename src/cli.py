@@ -214,7 +214,8 @@ def _do_check_tier(cfg, all_rows, targets, tier, limit, force_js, no_js):
 
         def on_js_start(n):
             js_task["t"] = progress.add_task(
-                "[magenta]  render JS[/magenta]", total=n, stat="")
+                "[magenta]  render JS[/magenta] [dim]%d tab[/dim]"
+                % cfg.js_concurrency(), total=n, stat="")
 
         def on_js_progress(res):
             if js_task["t"] is not None:
@@ -223,6 +224,18 @@ def _do_check_tier(cfg, all_rows, targets, tier, limit, force_js, no_js):
         results = asyncio.run(checker.run_check(
             cfg, rows, targets, use_js, on_progress=on_progress,
             on_js_start=on_js_start, on_js_progress=on_js_progress, quiet=True))
+
+    va, chiu = getattr(checker.run_check, "dns_va", (0, 0))
+    if va or chiu:
+        console.print("  [dim]DNS: %d ten mien bi mang chan, da va bang dia chi "
+                      "that. Link nao van khong vao duoc mang ma "
+                      "MANG_CUA_BAN_CHAN (mang chan, khong phai link chet)[/dim]"
+                      % (va + chiu))
+
+    bo = getattr(checker.run_check, "js_skipped_robots", 0)
+    if bo:
+        console.print("  [dim]bo qua %d lan render — robots.txt cua site da cam "
+                      "Googlebot, ket luan khong doi duoc[/dim]" % bo)
 
     return results
 
@@ -265,6 +278,7 @@ def run(
     js: bool = typer.Option(False, "--js", help="Ep bat render JS cho moi tier"),
     no_js: bool = typer.Option(False, "--no-js", help="Tat render JS du config bat"),
     no_diff: bool = typer.Option(False, "--no-diff", help="Bo qua buoc so sanh voi lan chay truoc"),
+    no_ghichu: bool = typer.Option(False, "--no-ghichu", help="Bo qua buoc xuat file goc co chu thich"),
 ):
     """Chay tron goi: nap du lieu → check tung tier → xuat bao cao."""
     tui.show_banner()
@@ -379,6 +393,13 @@ def run(
             console.print("  [dim]Chua co lan chay truoc de so sanh. "
                           "Lan sau chay lai se co.[/dim]")
 
+    # ---------- buoc 5: dung lai file goc de nguoi doc nhin bang quen thuoc
+    if not no_ghichu:
+        console.print("\n[bold]› Buoc 5 — File goc co chu thich[/bold]")
+        p = _do_ghichu(cfg)
+        if p:
+            written.append(Path(p))
+
     body = Table.grid(padding=(0, 2))
     body.add_column(style="dim")
     body.add_column()
@@ -482,6 +503,53 @@ def doisoat(
     console.print(tui.ok_panel("Doi soat xong",
                                "File gui cho ben cung cap  →  %s" % p))
     console.print()
+
+
+@app.command()
+def ghichu(
+    config_path: str = typer.Option(DEFAULT_CONFIG, "--config", "-c"),
+    url: str = typer.Option("", "--url", help="Ghi de source.url trong config"),
+    output: str = typer.Option("", "--output", "-o", help="Duong dan file xlsx"),
+    results_dir: str = typer.Option("", "--results-dir",
+                                    help="Thu muc chua ket qua check"),
+):
+    """Xuat lai file nguon GOC (giu nguyen tung tab) kem cot chu thich to mau."""
+    tui.show_banner()
+    cfg = _load(config_path)
+    p = _do_ghichu(cfg, url, results_dir or None, output or None)
+    if p:
+        console.print(tui.ok_panel("Xong", "File goc co chu thich  →  %s" % p))
+        console.print()
+
+
+def _do_ghichu(cfg, url="", thu_muc=None, output=None):
+    """Dung file goc co chu thich. Tra ve duong dan, hoac None neu that bai.
+
+    Loi o buoc nay khong duoc lam hong ca lan chay - ket qua check da ghi ra
+    tu truoc roi, day chi la ban tien ich doc them.
+    """
+    import ghichu as gc_mod
+
+    try:
+        with console.status("[cyan]Dang tai lai file nguon goc...[/cyan]",
+                            spinner="dots"):
+            tabs, file_kq, dem = gc_mod.build(cfg, url, thu_muc)
+    except SystemExit as e:
+        console.print(tui.err_panel("Khong tai duoc nguon du lieu", e))
+        return None
+    except Exception as e:  # noqa: BLE001 - khong de hong ca lan chay
+        console.print(tui.warn_panel("Khong dung duoc file goc co chu thich",
+                                     "%s: %s" % (type(e).__name__, e)))
+        return None
+
+    out = output or str(Path(cfg.output.get("dir", "results"))
+                        / ("%s_%s_goc-chu-thich.xlsx"
+                           % (date.today().isoformat(), cfg.site_name)))
+    p = gc_mod.write_xlsx(tabs, out, cfg, file_kq, dem)
+    console.print("  [dim]%d tab · %d chu thich · doc tu: %s[/dim]"
+                  % (len(tabs), sum(dem.values()),
+                     ", ".join(file_kq) if file_kq else "chua co ket qua check"))
+    return p
 
 
 @app.command()

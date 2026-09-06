@@ -155,7 +155,8 @@ def write_xlsx(results, path, cfg=None):
          "KHONG can mo tay. Trong so nay co %d link hoan hao (muc TOT)."
          % d["HOAN_HAO"]),
         (D.V_MAT, d[D.V_MAT],
-         "Tool doc duoc trang va chac chan link khong con (404/410/bai bi go...).",
+         "Tool doc duoc trang va chac chan link khong con gia tri (404/410/bai "
+         "bi go/trang noindex).",
          "KHONG can mo tay. Thay bang nguon moi."),
         (D.V_CHECK, d[D.V_CHECK],
          "Tool KHONG doc duoc noi dung that (chan bot, captcha, dang nhap, "
@@ -288,9 +289,11 @@ def write_xlsx(results, path, cfg=None):
         g.cell(row=g.max_row, column=c).fill = HEADER_FILL
         g.cell(row=g.max_row, column=c).font = HEADER_FONT
     for v, mean in (
-        (D.V_SONG,  "Tool nhin thay the <a>. Chac chan con link. Khong can mo tay. "
-                    "Gom ca link noindex va link tro sai tang - van la link con."),
-        (D.V_MAT,   "Tool doc duoc trang va chac chan link khong con. Khong can mo tay."),
+        (D.V_SONG,  "Tool nhin thay the <a> va trang co the duoc index. Chac chan "
+                    "con link. Khong can mo tay. Gom ca link tro sai tang."),
+        (D.V_MAT,   "Tool doc duoc trang va chac chan link khong con gia tri: 404, "
+                    "410, bai bi go, hoac trang mang the noindex (Google khong "
+                    "doc toi nen the <a> vo nghia). Khong can mo tay."),
         (D.V_CHECK, "Tool chua doc duoc noi dung that. CHUA ket luan. Xem sheet "
                     "'Can check tay'."),
     ):

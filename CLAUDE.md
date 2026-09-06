@@ -31,8 +31,10 @@ backlink-checker/
 │   ├── urlutil.py     chuẩn hoá URL dùng chung
 │   ├── ingest.py      Google Sheets/Docs → master CSV đã lọc sạch
 │   ├── checker.py     chạy check
+│   ├── robotscheck.py đọc robots.txt, hỏi "Googlebot có được vào không"
 │   ├── diagnose.py    biến tín hiệu thô thành mã lỗi + việc cần làm
 │   ├── report.py      xuất XLSX tô màu
+│   ├── ghichu.py      dựng lại file nguồn gốc, thêm cột chú thích tô màu
 │   └── compare.py     so sánh 2 lần chạy
 └── results/           kết quả, đặt tên theo ngày
 ```
@@ -50,7 +52,8 @@ Sau khi cấu hình xong, chỉ cần một lệnh:
 
 Lệnh này tự làm hết: nạp dữ liệu từ Google Sheet → làm sạch → check từng tier
 **theo thứ tự `priority` trong config** (tier quan trọng nhất chạy trước) →
-xuất CSV + XLSX tô màu → so sánh với lần chạy trước → in báo cáo.
+xuất CSV + XLSX tô màu → so sánh với lần chạy trước → in báo cáo → dựng lại
+**file gốc có chú thích**.
 
 Các cách gọi tương đương:
 
@@ -77,6 +80,7 @@ rồi Enter, thoát bằng `exit`).
 | `--skip-ingest` | Dùng master CSV có sẵn, không tải lại Google Sheet |
 | `--js` / `--no-js` | Ép bật/tắt render JavaScript |
 | `--no-diff` | Bỏ bước so sánh với lần trước |
+| `--no-ghichu` | Bỏ bước xuất file gốc có chú thích (bước 5) |
 
 ### Lệnh con
 
@@ -87,6 +91,7 @@ rồi Enter, thoát bằng `exit`).
 | `.\blcheck.bat check -t 2` | Chỉ check, không tải lại Sheet |
 | `.\blcheck.bat diff <cũ> <mới>` | So sánh hai lần chạy |
 | `.\blcheck.bat doisoat` | Đối soát với bên cung cấp: họ đưa bao nhiêu, ta nhận bao nhiêu, đòi bù bao nhiêu |
+| `.\blcheck.bat ghichu` | Xuất lại **file nguồn gốc** giữ nguyên từng tab, thêm cột chú thích tô màu |
 
 ### Lần chạy đầu nên làm gì
 
@@ -111,6 +116,60 @@ khoảng 600–700, đồng thời tier 1 và 2 mới thật sự được rende
 `auto_tiers: [3, 4]` bỏ sót đúng hai tầng quan trọng nhất).
 
 Tắt bằng `js.escalate: false` để quay về cách cũ.
+
+### Lượt render chạy song song
+
+Lượt 2 là khâu chậm nhất cả đợt chạy — chiếm khoảng 3/4 tổng thời gian. Nó mở
+nhiều tab Chromium cùng lúc, mỗi tab một context riêng để cookie site này không
+lẫn sang site kia:
+
+```yaml
+js:
+  concurrency: auto   # auto | 1..6
+```
+
+Dự án hiện tại đang đặt **`concurrency: 6`** (trần cứng). Muốn hạ về mức an
+toàn thì sửa đúng dòng đó thành `4` hoặc `auto`, không đụng vào code.
+
+`auto` = `min(4, số CPU // 2)`. Máy 12 nhân ra 4 tab, máy 2 nhân ra 1 tab —
+tức đúng bằng hành vi tuần tự cũ, nên tool đem sang máy yếu vẫn chạy được.
+Điền tay quá 6 sẽ bị hạ xuống 6 kèm cảnh báo: mỗi tab tốn khoảng 300MB RAM mà
+không nhanh thêm bao nhiêu.
+
+**Các tab vẫn tôn trọng `per_domain_delay`.** Nhiều URL cùng một domain phải xếp
+hàng y như lượt 1 — không có chuyện 4 tab cùng bắn vào một directory rồi ăn
+`HTTP_429` giả. Hàng đợi còn được xếp xen kẽ domain trước khi chia việc, để các
+tab không cùng kẹt ở một chỗ (tier 1 có domain `network-316491.mn.co` giữ tới 31
+link liền nhau).
+
+Đo trên dự án hiện tại: một lần chạy full 4 tier từ khoảng 4h30 xuống còn
+khoảng 1h35.
+
+**Mỗi lần render có trần cứng.** `page.goto()` nhận tham số timeout, nhưng
+`page.content()` và `page.evaluate()` thì **không** — API Playwright không có
+chỗ khai, hai hàm này chờ vô hạn. Trang có JS chạy liên tục (mn.co, penzu —
+đúng những site mục `wait_until` đã cảnh báo là không bao giờ "idle") treo ở đó
+mãi mãi được. Worker đang treo vẫn **giữ domain lock**, nên mọi worker khác bốc
+phải URL cùng domain sẽ kẹt theo, và cả lượt render đứng hình.
+
+Trần tính bằng `js.timeout + 2 × js.wait_after + 20s` (cấu hình hiện tại: 92
+giây). Quá ngưỡng thì vứt tab, ghi `render_that_bai`, đi tiếp. Xem
+`_tran_render()` trong [checker.py](src/checker.py).
+
+**Link đã bị `robots.txt` chặn thì không render.** `robots.txt` được đọc xong
+ngay từ lượt 1, mà `diagnose()` chốt `ROBOTS_CHAN_GOOGLE` **trước mọi nhánh
+khác** — nên với những dòng này, đọc được nội dung hay không cũng ra đúng một
+kết luận. Mở Chromium chỉ để vứt kết quả đi. Đo trên lần chạy 2026-09-06: tier 1
+có 324 dòng `robots = bi chan`, **293 dòng trong số đó đã tốn công render**, và
+cả 324 đều ra `ROBOTS_CHAN_GOOGLE` — không một dòng nào đổi kết luận nhờ render.
+Xem `_bo_render_thua()` trong [checker.py](src/checker.py). Console in rõ số lần
+đã bỏ qua.
+
+Hàng đợi cũng được **rải đều theo domain**, không phải xếp vòng tròn. Vòng tròn
+làm cạn domain nhỏ trước rồi dồn toàn bộ phần còn lại của domain lớn vào cuối
+hàng — chính là chỗ mọi worker cùng kẹt vào nhau. Rải đều thì 31 link của
+`network-316491.mn.co` trải từ đầu đến cuối, và không có hai mục liên tiếp nào
+trùng domain.
 
 `js.wait_until` phải là `domcontentloaded`, **không** phải `networkidle` —
 trang có polling (mn.co, penzu) không bao giờ "idle" nên networkidle luôn
@@ -280,14 +339,15 @@ là "lặp lại" phụ thuộc vào thứ tự tab trong Google Sheet.
 | Link giao trùng | Cùng một URL đếm hai lần, chỉ tính được một |
 | Trỏ về money site | Đó là link của chính mình, không phải backlink |
 | URL hỏng | Ô dữ liệu không phải URL mở được |
-| Chết khi kiểm tra | 404 / 410 / domain hết hạn / bài bị gỡ |
-| Trang noindex | Thẻ `<a>` còn, nhưng Google không index trang chứa nó nên link không truyền được giá trị nào |
+| Chết khi kiểm tra | 404 / 410 / domain hết hạn / bài bị gỡ / **noindex** / **nofollow** / **canonical khác** / **cần đăng nhập mới xem** / **robots.txt chặn Google** |
+| Không truyền giá trị (phụ) | Mã lỗi chính là chuyện khác nhưng dòng vẫn dính `noindex` / `nofollow` / `canonical khác` — bắt qua cột `canh_bao_them` |
 
-Lưu ý cách đọc khoản **"Trang noindex"**: trong file kết quả check nó nằm ở nhóm
-`Link còn` — tool nhìn thấy thẻ `<a>`, không cần ai mở tay xác minh. Nhưng trong
-đối soát thì nó **không tính là đã giao**, vì trang không được index thì link
-không truyền được giá trị nào. Hai câu hỏi khác nhau, hai câu trả lời khác nhau
-trên cùng một dòng dữ liệu.
+Lưu ý cách đọc khoản **"Không truyền giá trị (phụ)"**: `TRANG_NOINDEX`,
+`NOFOLLOW`, `CANONICAL_KHAC` khi là **mã lỗi chính** đã được xếp thẳng vào nhóm
+`Link mất` ngay trong file kết quả check, nên chúng rơi vào khoản "Chết khi kiểm
+tra". Khoản phụ chỉ còn cộng thêm cho những dòng kết luận là `Link còn` nhưng
+vẫn dính một trong ba thứ đó ở cột `canh_bao_them`. Hai đường không chồng nhau,
+không đếm trùng.
 
 Nhóm **"phải check tay"** cố ý **không** đưa vào yêu cầu bù: tool chưa đọc được
 nội dung thật nên chưa có bằng chứng. Đòi bù bằng số liệu chưa xác minh là tự
@@ -295,6 +355,58 @@ làm yếu lập luận của mình. Con số này hiện riêng ở khối "Ch�
 
 Chưa chạy check bao giờ thì cột `Chết` bằng 0 và tool cảnh báo rõ — đó là vì
 chưa đo, không phải vì không có link chết.
+
+## File gốc có chú thích
+
+Ba file trong `results/` trả lời ba câu hỏi khác nhau:
+
+| File | Trả lời |
+|------|---------|
+| `<ngày>_<site>_tier<N>.xlsx` | Link nào hỏng, hỏng vì gì — danh sách **đã làm sạch**, gộp mọi tab thành một bảng |
+| `<ngày>_<site>_doi-soat.xlsx` | Họ giao bao nhiêu, ta nhận bao nhiêu, đòi bù bao nhiêu |
+| `<ngày>_<site>_goc-chu-thich.xlsx` | **Chính file bên cung cấp gửi**, giữ nguyên từng tab từng dòng, mỗi dòng thêm chú thích |
+
+File thứ ba sinh ra ở bước 5 của `blcheck run`, hoặc chạy riêng:
+
+```powershell
+.\blcheck.bat ghichu
+```
+
+Nó tải lại nguồn gốc, **không gộp tab, không lọc dòng nào**, chỉ thêm 3 cột vào
+sau cột cuối cùng của mỗi tab:
+
+| Cột thêm | Nội dung |
+|----------|----------|
+| `Ket luan` | Link còn / Link mất / Phải check tay / Trùng lặp / Link của mình / URL hỏng / Chưa check |
+| `Ma loi` | Mã lỗi, để lọc trong Excel |
+| `Chu thich` | Chẩn đoán + việc cần làm + cảnh báo thêm + mã HTTP |
+
+Chỉ phần chú thích được tô màu, dữ liệu gốc giữ nguyên:
+
+| Màu | Nghĩa |
+|-----|-------|
+| xanh lá | Link còn, dùng được |
+| đỏ | Link mất — gồm cả noindex, nofollow, canonical khác |
+| vàng | Chưa kết luận được, phải mở tay |
+| cam | Bị loại ngay từ bước làm sạch: trùng lặp, trỏ về money site, ô không phải URL, domain bị loại |
+| xám | Không tính (cột ngoài `sheet_columns`) hoặc chưa chạy check tới |
+
+Điểm mạnh của file này là **giải thích được những dòng biến mất khỏi
+`backlinks_master.csv`**. Ví dụ tab `Tang 4_Bookmarks`: 418 dòng tô cam ghi rõ
+"URL này đã xuất hiện trước đó ở tab `Tang 4_Blog Comment`" — nhìn ngay trên file
+quen thuộc, không phải đối chiếu hai bảng.
+
+Một dòng có nhiều URL (tab 2 cột link) thì cột `Ket luan` ghi tổng hợp
+(`2 link: 1 Link còn, 1 Link mất`) và tô màu theo link xấu nhất; cột `Chu thich`
+liệt kê từng link. Sheet đầu tiên `Doc truoc` là bảng chú giải kèm số lượng từng
+nhãn.
+
+Chạy `run -n 20` thì phần lớn dòng mang nhãn "Chưa check" — đúng, vì mới check 20
+link đầu mỗi tier.
+
+Thứ tự quét trùng lặp giống hệt `ingest.py`: lần xuất hiện **đầu tiên** được giữ,
+các lần sau mới bị đánh dấu trùng. Nên tab nào bị coi là bản sao phụ thuộc thứ tự
+tab trong Google Sheet.
 
 ## Đọc file kết quả
 
@@ -322,8 +434,8 @@ Mỗi link mang **hai** nhãn độc lập, trả lời hai câu hỏi khác nha
 
 | Kết luận | Màu | Nghĩa | Phải làm gì |
 |----------|-----|-------|-------------|
-| Link còn | xanh lá | Tool đọc được trang và **nhìn thấy thẻ `<a>`** | Không cần mở tay. Xem `muc_do` để biết link tốt hay còn khiếm khuyết. Nhóm này gồm cả `TRANG_NOINDEX` và `TRO_SAI_TANG` — link vẫn nằm đó, chỉ là giá trị thấp hoặc trỏ sai tầng |
-| Link mất | đỏ | Tool đọc được trang và chắc chắn link không còn (404/410/domain hết hạn/bài bị gỡ) | Không cần mở tay. Thay nguồn mới |
+| Link còn | xanh lá | Tool đọc được trang, **nhìn thấy thẻ `<a>`**, link dofollow và trang index được — tức là link **truyền được giá trị** | Không cần mở tay. Xem `muc_do` để biết link tốt hay còn khiếm khuyết. Nhóm này gồm cả `TRO_SAI_TANG` và `SAI_URL_DICH` — link vẫn truyền sức mạnh về hệ thống mình, chỉ là vào sai chỗ |
+| Link mất | đỏ | Tool đọc được trang và chắc chắn link **không truyền được giá trị nào**: 404/410/domain hết hạn/bài bị gỡ, hoặc thẻ `<a>` vẫn còn nhưng **noindex / nofollow / canonical khác** | Không cần mở tay. Đòi bù hoặc thay nguồn mới |
 | Phải check tay | vàng | Tool **không đọc được** nội dung thật (chặn bot, captcha, tường đăng nhập, chưa render JS, timeout…) | **Chưa phải là link mất.** Xem sheet "Cần check tay" |
 
 Nhóm "Phải check tay" được chia tiếp theo cột `cach_xu_ly`:
@@ -362,6 +474,9 @@ một bậc** (lỗi ở tầng xương sống thì nghiêm trọng hơn), tier 
 - `khop_tang` — link này thực sự rơi vào tầng nào: `money`, `tier 2`, `tier 3`…
   So với đích đầu tiên khai trong `targets` của tier để biết cấu trúc thật có
   khớp sơ đồ không.
+- `robots` — `cho phep` / `bi chan` / `khong ro`, đọc từ `robots.txt` của site
+  nguồn. `bi chan` nghĩa là Googlebot không được phép vào URL đó. `khong ro` là
+  chưa đọc được file (mất mạng, 403, 5xx) — tool **không** kết luận gì từ đó.
 - `rendered` — `http` hay `playwright`. Kết luận "mất link" từ dòng `http` trên
   một domain render JS là không đáng tin.
 
@@ -381,6 +496,11 @@ thì thêm vào đó.
 | `SOFT_404` | 200 nhưng title là trang lỗi | Coi như mất link |
 | `DOMAIN_RAO_BAN` | nội dung là trang parking/rao bán | Bỏ. Có thể độc hại |
 | `CHUYEN_VE_TRANG_CHU` | bài viết bị redirect về trang chủ | Dấu hiệu bài bị gỡ |
+| `TRANG_NOINDEX` | meta robots noindex, thẻ `<a>` vẫn còn | **Coi như mất link.** Google không đọc tới trang nên thẻ `<a>` không truyền được chút giá trị nào. Có tính vào khoản đòi bù |
+| `NOFOLLOW` | rel nofollow/ugc/sponsored | **Coi như mất link.** Thẻ `<a>` còn đó nhưng Google không truyền chút sức mạnh nào. Đòi đổi sang dofollow hoặc bù. Có tính vào khoản đòi bù |
+| `CANONICAL_KHAC` | canonical trỏ đi nơi khác | **Coi như mất link.** Google gộp trang vào bản canonical, giá trị chảy sang chỗ khác. Có tính vào khoản đòi bù |
+| `ROBOTS_CHAN_GOOGLE` | `robots.txt` của site có dòng `Disallow` khớp đường dẫn này | **Coi như mất link.** Trang mở bình thường với người, thẻ `<a>` còn nguyên, nhưng Googlebot bị cấm thu thập nên không truyền giá trị. Bằng chứng đòi bù rất mạnh: dán nguyên dòng `Disallow` trong `robots.txt` của chính họ. Có tính vào khoản đòi bù |
+| `CAN_DANG_NHAP_MOI_XEM` | đã render bằng Chromium mà trang vẫn đòi đăng nhập | **Coi như mất link.** Googlebot không có tài khoản nên không vào được — đăng nhập tay chỉ xác nhận bài còn, không làm link truyền được giá trị. Việc cần làm là đổi chế độ chia sẻ sang công khai. Có tính vào khoản đòi bù |
 
 ### Chưa kết luận được — đừng vội báo mất link
 
@@ -394,8 +514,9 @@ thì thêm vào đó.
 | `CAN_BAT_JS` | domain trong `force_domains` mà chưa render | Chạy lại với `--js` |
 | `CHUA_CAI_PLAYWRIGHT` | tier cần JS nhưng máy chưa cài Playwright | Cài rồi chạy lại tier đó |
 | `CHUA_RENDER_DUOC` | đã mở bằng Chromium nhưng vẫn không tải được nội dung | Mở tay bằng trình duyệt |
-| `TUONG_DANG_NHAP` | nội dung đòi đăng nhập | Kiểm tra bằng tài khoản đã đăng bài |
+| `TUONG_DANG_NHAP` | lượt HTTP thô đòi đăng nhập, chưa render | Chạy lại có render. Vẫn đòi đăng nhập thì thành `CAN_DANG_NHAP_MOI_XEM` |
 | `SSL_LOI` | chứng chỉ hỏng | Trang có thể vẫn sống, xác nhận tay |
+| `MANG_CUA_BAN_CHAN` | DNS của máy trả về `127.0.0.1`, tool đã vá bằng địa chỉ thật mà đường truyền vẫn cắt kết nối | **Nói về máy chạy tool, không nói về link.** Googlebot thu thập từ hạ tầng Google, không đi qua mạng này. Đừng thay nguồn, đừng đưa vào yêu cầu bù. Muốn đọc nội dung thì đổi 4G/VPN rồi chạy lại tier đó |
 
 ### Link mất giá trị dù vẫn tồn tại
 
@@ -403,9 +524,6 @@ thì thêm vào đó.
 |----|----------|-------|
 | `LINK_BI_GO` | trang sống, đọc được nội dung thật, không còn thẻ `<a>` nào về hệ thống mình | Admin gỡ link. Đăng lại |
 | `TRO_SAI_TANG` | link còn, trỏ đúng hệ thống mình nhưng **sai tầng** so với khai báo | Không phải link hỏng. Sửa khai báo `targets` cho khớp thực tế, hoặc đặt lại link |
-| `TRANG_NOINDEX` | meta robots noindex, thẻ `<a>` vẫn còn | Google không tính. Link **chưa mất** (không phải mở tay xác minh) nhưng **có tính vào khoản đòi bù** — mua backlink là mua giá trị truyền về, không phải mua một thẻ `<a>` nằm trên trang Google không đọc tới |
-| `CANONICAL_KHAC` | canonical trỏ đi nơi khác | Giá trị chuyển sang URL khác |
-| `NOFOLLOW` | rel nofollow/ugc/sponsored | Không truyền sức mạnh |
 | `SAI_URL_DICH` | đúng domain, sai trang | Sửa về đúng URL nếu còn quyền |
 | `LINK_QUA_TRUNG_GIAN` | href đi qua rút gọn/redirect | Ưu tiên link trỏ thẳng |
 | `TRANG_NHIEU_LINK_RA` | vượt `thresholds.outbound_link_limit` | Đặc trưng link farm |
@@ -428,10 +546,109 @@ network:
   concurrency: 8         # tăng 15–20 nếu mạng khoẻ, dễ bị chặn IP hơn
   per_domain_delay: 1.5  # KHÔNG hạ dưới 1.0
   timeout: 25
-  retries: 1
+  retries: 1             # chỉ áp cho lỗi kết nối, KHÔNG áp cho timeout
+
+js:
+  concurrency: auto      # số tab Chromium song song ở lượt render
 ```
 
 Nếu đặt `per_domain_delay` dưới 1.0, tool in cảnh báo ngay khi khởi động.
+
+### `retries` không áp cho timeout
+
+`retries` chỉ thử lại khi **lỗi kết nối** (`ConnectError`, SSL, reset) — loại
+thất bại trong chưa tới một giây nên thử lại gần như miễn phí và hay cứu được.
+
+Gặp **timeout** thì tool bỏ luôn lượt thử lại. Một lần timeout đã trả trọn 25
+giây; bắn lại y hệt thao tác vừa thất bại là khoản đắt nhất cả đợt chạy mà hiếm
+khi đổi được kết quả. Link đó vẫn còn một lượt nữa: nó được đẩy sang Chromium ở
+lượt 2 (xem `_nen_render(..., loi_ket_noi=True)` trong
+[checker.py](src/checker.py)), mà trình duyệt thật mạnh hơn httpx lặp lại nhiều.
+
+Hệ quả cần biết: **máy chưa cài Playwright** thì link timeout đi thẳng tới
+`CHUA_CAI_PLAYWRIGHT` thay vì có cơ hội được lượt retry cứu. Tool vẫn không kết
+luận mất link — chỉ chuyển sang "phải check tay".
+
+## Khi router hoặc nhà mạng chặn tên miền
+
+Một số router và nhà mạng trả về `127.0.0.1` cho tên miền bị chặn. `127.0.0.1`
+là **chính máy đang chạy tool** — nên tool gõ cửa chính nó rồi báo
+`KET_NOI_TU_CHOI`, trong khi link ngoài đời vẫn sống.
+
+Đo thật ngày 2026-09-06 trên một máy chạy tool:
+
+```
+huthamctp.jimdosite.com  →  127.0.0.1        (hỏi router 192.168.0.1)
+                         →  162.159.129.70   (hỏi 8.8.8.8, địa chỉ thật)
+```
+
+Cả **24 dòng** `KET_NOI_TU_CHOI` trong đợt chạy hôm đó đều là chuyện này, trên
+5 tên miền: `hackmd.io`, `g0v.hackmd.io`, `medium.com`, `band.us`,
+`huthamctp.jimdosite.com`. Không một trường hợp từ chối kết nối thật nào.
+
+Tool tự xử lý, người dùng không phải đụng vào cài đặt máy — xem
+[dnsfix.py](src/dnsfix.py):
+
+1. Trước khi tải trang, kiểm tra tên miền có bị phân giải về `127.0.0.1` không.
+2. Nếu có, hỏi lại qua **DNS-over-HTTPS** (đi thẳng qua HTTPS nên router không
+   xen vào được).
+3. Ép `socket.getaddrinfo` dùng địa chỉ thật. HTTPS vẫn an toàn: SNI và header
+   `Host` lấy từ URL chứ không lấy từ `getaddrinfo`, chứng chỉ vẫn được kiểm
+   tra đúng tên miền.
+4. Chromium chạy ở tiến trình riêng nên được truyền cùng bảng địa chỉ đó qua
+   `--host-resolver-rules`.
+
+Tắt bằng `network.dns_fallback: false` — chỉ nên tắt khi máy nằm trong mạng nội
+bộ dùng split-DNS hợp lệ.
+
+**Vì sao phải vá ở tầng DNS chứ không chỉ đổi tên mã lỗi.** Nếu máy đang chạy
+bất kỳ web server nào nghe cổng 443 (XAMPP, Docker, một dev server bỏ quên),
+local server sẽ **trả lời thay** cho tên miền bị bắt cóc. Tool nhận HTTP 200,
+đọc một trang HTML lạ, không thấy thẻ `<a>` nào về money site, rồi kết luận
+`LINK_BI_GO` — *"admin đã gỡ link, đăng lại"*. Sai hoàn toàn, tô đỏ, tính vào
+tiền đòi bù, và **không có dấu hiệu gì để nhận ra**. Vá từ tầng DNS thì cả hai
+kiểu hỏng — ồn ào và im lặng — đều biến mất.
+
+**Giới hạn.** Chỉ vá được kiểu chặn bằng DNS. Nếu đường truyền còn lọc theo tên
+miền — nối được tới IP thật nhưng vừa khai tên miền là bị cắt — thì không tool
+nào vượt qua được. Trường hợp đó ra mã `MANG_CUA_BAN_CHAN`.
+
+### `MANG_CUA_BAN_CHAN` không phải lỗi của link
+
+Tool trả lời câu hỏi **"Googlebot có vào được và có nhận được giá trị không"**,
+không phải "máy tôi có mở được trang không". Hai câu đó khác nhau, và mã này
+nằm đúng chỗ khác nhau đó.
+
+Googlebot thu thập từ hạ tầng của Google, **không đi qua mạng đang chạy tool**.
+Đo được: máy chủ vẫn sống — nối tới IP thật thành công ở tầng TCP, và bắt tay
+TLS cũng thành công nếu khai một tên miền khác. Chỉ riêng kết nối khai đúng tên
+miền mới bị cắt, và bị cắt ở đường truyền nội địa. Nên khả năng Google vẫn thu
+thập bình thường là rất cao.
+
+Vì vậy:
+
+- Mức độ là **GHI CHÚ**, không phải CẢNH BÁO hay NẶNG.
+- Mã này **đứng ngoài `bump_by_tier`** (xem `MA_MOI_TRUONG` trong
+  [diagnose.py](src/diagnose.py)). Nếu không, một link tier 2 (`priority: 1`) mà
+  tool không đọc được vì mạng nhà sẽ bị đẩy lên NẶNG màu cam — trông y như link
+  đang hỏng, trong khi thực tế chưa đo được gì về nó.
+- **Không** tính vào yêu cầu bù, và việc cần làm ghi rõ là đừng thay nguồn.
+
+Cái vẫn chưa biết là **thẻ `<a>` còn trên trang hay không** — vì tool chưa đọc
+được nội dung lần nào. Đó là khoảng trống của phép đo, không phải khuyết điểm
+của link. Muốn lấp thì đổi 4G/VPN rồi chạy lại tier đó.
+
+Kết quả đo lại trên đúng 24 link đó sau khi vá:
+
+| Tên miền | Trước | Sau |
+|---|---|---|
+| `hackmd.io` (9) | `KET_NOI_TU_CHOI` | `TRANG_RONG` — đã đọc được site thật |
+| `g0v.hackmd.io` (3) | `KET_NOI_TU_CHOI` | 1 `OK`, 2 `MANG_CUA_BAN_CHAN` |
+| `medium.com` (4), `band.us` (5), `jimdosite` (3) | `KET_NOI_TU_CHOI` | `MANG_CUA_BAN_CHAN` |
+
+Vì tool được dùng chung trên nhiều máy, **cùng một danh sách link chạy ở hai
+mạng khác nhau sẽ ra kết quả khác nhau**. Mã `MANG_CUA_BAN_CHAN` tồn tại để chỗ
+lệch đó hiện ra thành chữ, thay vì lẫn vào đống "link chết".
 
 ## Việc KHÔNG nên làm
 
@@ -449,7 +666,12 @@ Nếu đặt `per_domain_delay` dưới 1.0, tool in cảnh báo ngay khi khởi
 
 Tool trả lời "link có tồn tại và trỏ đúng không". Nó **không** biết Google đã
 index trang chứa link hay chưa — cần Google Search Console API hoặc dịch vụ như
-Ahrefs / Majestic. Link tồn tại nhưng trang không được index thì gần như không
+Ahrefs / Majestic.
+
+Cần phân biệt hai câu hỏi gần giống nhau: **"Google có được phép vào không"** thì
+tool trả lời được — đọc `robots.txt`, ra mã `ROBOTS_CHAN_GOOGLE`. Còn **"Google
+đã thực sự index chưa"** thì không, vì được phép vào không có nghĩa là đã vào.
+Phần lớn giá trị nằm ở câu hỏi thứ nhất, nhưng đừng đọc nhầm cái này thành cái kia. Link tồn tại nhưng trang không được index thì gần như không
 truyền giá trị. Cột `indexable` chỉ đọc được thẻ `noindex` và `canonical` trên
 trang, không phải trạng thái index thật.
 

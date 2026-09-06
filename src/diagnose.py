@@ -36,7 +36,14 @@ LOGIN_PAT = re.compile(
 
 CAPTCHA_PAT = re.compile(
     r"(cloudflare|just a moment|checking your browser|captcha|are you (a )?human|"
-    r"ddos.?guard|attention required|access denied|akamai|请稍候)", re.I)
+    r"ddos.?guard|attention required|access denied|akamai|请稍候|"
+    # WAF doi moi: khong con dung chu "captcha" nua ma bao thang la dang xac
+    # minh trinh duyet. Thieu nhung mau nay thi ofuse.me / vercel bi tut xuong
+    # TRANG_RONG - sai han ban chat, vi trang do nguoi mo tay van xem duoc.
+    r"security checkpoint|vercel security|security verification|"
+    r"(failed to )?verify (your |you are using a )?browser|verifying you are human|"
+    r"perimeterx|datadome|incapsula|bot protection|"
+    r"enable javascript and cookies to continue)", re.I)
 
 # Rut gon link / trang trung gian. Tach lam hai:
 #   HOST    - so khop dung ten mien (khong dung chuoi con, vi "t.co" nam ngay
@@ -79,6 +86,15 @@ CATALOG = {
     "KET_NOI_TU_CHOI": (SEV_CHET,
         "May chu tu choi ket noi hoac khong con phuc vu.",
         "Kiem tra lai bang trinh duyet 1 lan; neu van hong thi thay nguon moi."),
+    "MANG_CUA_BAN_CHAN": (SEV_GHICHU,
+        "MANG DANG CHAY TOOL chan ten mien nay - khong lien quan gi den chat "
+        "luong link. Googlebot thu thap tu ha tang cua Google, khong di qua "
+        "mang nay, nen gan nhu chac chan van vao duoc binh thuong: may chu van "
+        "song (noi duoc toi IP that), chi rieng ket noi tu may nay bi cat.",
+        "KHONG phai viec cua ben cung cap, cung KHONG phai loi cua link - dung "
+        "thay nguon va dung dua vao yeu cau bu. Day chi la cho tool CHUA DOC "
+        "DUOC noi dung: muon biet the <a> con khong thi doi 4G/VPN roi chay "
+        "lai tier nay."),
     "SSL_LOI": (SEV_NANG,
         "Chung chi HTTPS het han hoac khong hop le.",
         "Trang van co the con song. Mo bang trinh duyet de xac nhan truoc khi bo."),
@@ -138,6 +154,18 @@ CATALOG = {
     "TUONG_DANG_NHAP": (SEV_CANHBAO,
         "Noi dung bi che sau tuong dang nhap nen khong doc duoc link.",
         "Kiem tra tay bang tai khoan da dung de dang."),
+    "ROBOTS_CHAN_GOOGLE": (SEV_CHET,
+        "robots.txt cua site cam Googlebot thu thap dung duong dan nay. Trang "
+        "van mo binh thuong voi nguoi, the <a> van con, nhung Google khong bao "
+        "gio ghe vao nen link khong truyen duoc chut gia tri nao.",
+        "Doi ben cung cap dat link o duong dan khac khong bi cam, hoac bu link "
+        "moi. Bang chung: dan nguyen dong Disallow trong robots.txt cua ho."),
+    "CAN_DANG_NHAP_MOI_XEM": (SEV_CHET,
+        "Da mo bang Chromium that ma trang van doi dang nhap. Khach vang lai "
+        "khong xem duoc, nghia la Googlebot cung khong xem duoc - link nay "
+        "khong truyen duoc chut gia tri SEO nao.",
+        "Dang nhap vao site, doi che do chia se bai sang cong khai roi check lai. "
+        "Khong sua duoc thi doi bu nhu link chet."),
     "BI_CHAN_CAPTCHA": (SEV_CANHBAO,
         "Trang tra ve man hinh chong bot (Cloudflare / captcha).",
         "Bat --js, hoac kiem tra tay. Khong tinh la mat link."),
@@ -149,9 +177,11 @@ CATALOG = {
     "OK": (SEV_TOT,
         "Link song, dofollow, tro dung URL dich.",
         "Khong can lam gi."),
-    "NOFOLLOW": (SEV_CANHBAO,
-        "Link con nhung mang thuoc tinh nofollow/ugc/sponsored - khong truyen suc manh SEO.",
-        "Ghi nhan. Chi xu ly khi day la link tier 1 quan trong."),
+    "NOFOLLOW": (SEV_CHET,
+        "The <a> VAN CON nhung mang thuoc tinh nofollow/ugc/sponsored - Google "
+        "khong truyen chut suc manh SEO nao qua link nay.",
+        "Coi nhu MAT LINK: mua backlink la mua gia tri truyen ve, khong phai mua "
+        "mot the <a>. Yeu cau ben cung cap doi sang link dofollow hoac thay nguon."),
     "SAI_URL_DICH": (SEV_CANHBAO,
         "Link tro dung ten mien nhung sai trang cu the so voi ke hoach.",
         "Kiem tra tay va sua ve dung URL dich neu con quyen chinh sua."),
@@ -160,14 +190,15 @@ CATALOG = {
         "voi khai bao trong config. Xem cot khop_tang de biet no tro vao dau.",
         "Khong phai link hong - khong dua vao yeu cau bu. Hoac sua lai khai bao "
         "tier trong config cho dung thuc te, hoac dat lai link cho dung tang."),
-    "TRANG_NOINDEX": (SEV_NANG,
+    "TRANG_NOINDEX": (SEV_CHET,
         "The <a> VAN CON tren trang, nhung trang mang the noindex nen Google "
-        "khong tinh link nay.",
-        "Link chua mat - khong can mo tay xac minh. Uu tien tim them nguon khac "
-        "neu day la tier 1 hoac 2."),
-    "CANONICAL_KHAC": (SEV_CANHBAO,
-        "Trang co canonical tro sang URL khac, gia tri link bi chuyen di noi khac.",
-        "Kiem tra tay xem ban canonical co giu link khong."),
+        "khong bao gio doc toi - link khong truyen duoc chut gia tri nao.",
+        "Coi nhu MAT LINK: mua backlink la mua gia tri truyen ve, khong phai mua "
+        "mot the <a>. Thay bang nguon khac."),
+    "CANONICAL_KHAC": (SEV_CHET,
+        "Trang co canonical tro sang URL khac - Google gop trang nay vao ban "
+        "canonical, gia tri link chay di noi khac chu khong ve he thong cua ta.",
+        "Coi nhu MAT LINK. Dat lai link tren chinh ban canonical, hoac thay nguon."),
     "ANCHOR_RONG": (SEV_GHICHU,
         "Link ton tai nhung anchor text rong hoac chi la anh.",
         "Khong gap. Neu sua duoc thi dat anchor co tu khoa."),
@@ -219,17 +250,12 @@ X_TOOL, X_NGUOI = "Chay lai tool", "Mo trinh duyet"
 VERDICT = {
     # ---------------------------------------------- chac chan con link
     "OK":                   (V_SONG,  ""),
-    "NOFOLLOW":             (V_SONG,  ""),
     "ANCHOR_RONG":          (V_SONG,  ""),
     "ANCHOR_LA_URL":        (V_SONG,  ""),
     "SAI_URL_DICH":         (V_SONG,  ""),
     "LINK_QUA_TRUNG_GIAN":  (V_SONG,  ""),
     "TRANG_NHIEU_LINK_RA":  (V_SONG,  ""),
-    "CANONICAL_KHAC":       (V_SONG,  ""),
     "TRO_SAI_TANG":         (V_SONG,  ""),
-    # Trang noindex van la "link con": tool doc duoc trang va nhin thay the <a>.
-    # Muc do NANG da noi len viec no khong truyen gia tri SEO.
-    "TRANG_NOINDEX":        (V_SONG,  ""),
 
     # ---------------------------------------------- chac chan mat link
     "DOMAIN_KHONG_PHAN_GIAI": (V_MAT, ""),
@@ -239,6 +265,20 @@ VERDICT = {
     "DOMAIN_RAO_BAN":       (V_MAT,   ""),
     "CHUYEN_VE_TRANG_CHU":  (V_MAT,   ""),
     "LINK_BI_GO":           (V_MAT,   ""),
+    # Ba ma duoi day: the <a> VAN CON tren trang, nhung link khong truyen duoc
+    # chut gia tri nao ve he thong cua ta. Ve mat SEO khong khac gi mat link,
+    # va tool da doc duoc trang nen khong can ai mo tay xac minh -> xep vao MAT
+    # va tinh vao khoan doi bu.
+    #   TRANG_NOINDEX  Google khong bao gio doc toi trang chua link
+    #   NOFOLLOW       Google doc duoc nhung khong truyen suc manh
+    #   CANONICAL_KHAC gia tri chay sang ban canonical o noi khac
+    #   CAN_DANG_NHAP_MOI_XEM  Googlebot khong co tai khoan nen khong vao duoc
+    "TRANG_NOINDEX":        (V_MAT,   ""),
+    "NOFOLLOW":             (V_MAT,   ""),
+    "CANONICAL_KHAC":       (V_MAT,   ""),
+    "CAN_DANG_NHAP_MOI_XEM": (V_MAT,  ""),
+    #   ROBOTS_CHAN_GOOGLE     robots.txt cam Googlebot vao dung duong dan nay
+    "ROBOTS_CHAN_GOOGLE":   (V_MAT,   ""),
 
     # ---------------------------------------------- chua ket luan duoc
     "CHUA_CAI_PLAYWRIGHT":  (V_CHECK, X_TOOL),
@@ -253,6 +293,9 @@ VERDICT = {
     "TUONG_DANG_NHAP":      (V_CHECK, X_NGUOI),
     "SSL_LOI":              (V_CHECK, X_NGUOI),
     "KET_NOI_TU_CHOI":      (V_CHECK, X_NGUOI),
+    # Loi nam o mang cua nguoi chay tool, khong phai o link. Doi mang roi chay
+    # lai la may tu ket luan duoc, nen xep vao nhom X_TOOL.
+    "MANG_CUA_BAN_CHAN":    (V_CHECK, X_TOOL),
     "CHUYEN_SANG_DOMAIN_KHAC": (V_CHECK, X_NGUOI),
     "KHONG_PHAI_HTML":      (V_CHECK, X_NGUOI),
     "TRANG_RONG":           (V_CHECK, X_NGUOI),
@@ -274,8 +317,12 @@ HUONG_DAN_CHECK = {
     "TUONG_DANG_NHAP":     "Dang nhap vao site roi kiem tra link con trong bai khong",
     "SSL_LOI":             "Mo bang trinh duyet, bo qua canh bao chung chi de xem trang",
     "KET_NOI_TU_CHOI":     "Mo bang trinh duyet 1 lan. Van hong thi coi nhu mat link",
+    "MANG_CUA_BAN_CHAN":   "Khong phai loi cua link. Chi can doc noi dung thi doi "
+                           "4G/VPN roi chay lai tier nay",
     "CHUYEN_SANG_DOMAIN_KHAC": "Mo URL cuoi xem noi dung bai cu con khong",
     "KHONG_PHAI_HTML":     "Doi chieu lai URL trong file nguon, co the dan nham",
+    "CHUA_RENDER_DUOC":    "Da mo bang Chromium ma van khong tai duoc. Mo tay bang "
+                           "trinh duyet, doi trang nap xong roi Ctrl+F tim money site",
     "TRANG_RONG":          "Mo URL xem bai con noi dung khong hay chi con vo trang",
     "KHONG_RO":            "Mo URL bang trinh duyet, Ctrl+F tim ten mien money site",
 }
@@ -320,9 +367,23 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150):
     except (TypeError, ValueError):
         code = 0
 
+    # ---------------------------------------------------------- robots.txt cam
+    # Dat TRUOC moi nhanh khac vi day la bang chung DOC LAP voi viec tool co doc
+    # duoc noi dung hay khong. Trang tra 403 vi Cloudflare chan ta, ma robots.txt
+    # lai cam luon Googlebot -> khong con gi phai check tay: Google cung khong
+    # vao duoc, ket luan da chac. Nhung dong 404/410/DNS hong khong bi anh huong
+    # vi checker bo qua han buoc doc robots.txt cho chung (cot robots de rong).
+    if getattr(res, "robots", "") == "bi chan":
+        return _pack("ROBOTS_CHAN_GOOGLE", res)
+
     # ---------------------------------------------------------- trang loi
     if res.status == "PAGE_ERROR":
-        if "ssl" in err or "certificate" in err:
+        # Dat truoc SSL/timeout/connect: khi mang chan theo ten mien, loi bao ve
+        # co the la reset, timeout hay loi TLS tuy cach chan - nhung nguyen nhan
+        # thi da biet chac roi, khong can doan tu thong bao loi.
+        if page.get("mang_chan"):
+            key = "MANG_CUA_BAN_CHAN"
+        elif "ssl" in err or "certificate" in err:
             key = "SSL_LOI"
         elif "timeout" in err or "timedout" in err:
             key = "TIMEOUT"
@@ -364,6 +425,12 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150):
         if CAPTCHA_PAT.search(blob):
             return _pack("BI_CHAN_CAPTCHA", res)
         if LOGIN_PAT.search(blob):
+            # Luot HTTP tho gap tuong dang nhap thi chua chac - nhieu site tra
+            # khung dang nhap cho client la roi moi ve noi dung that bang JS.
+            # Nhung da mo bang Chromium that ma van bi chan thi khong con nghi
+            # ngo gi: khach vang lai khong xem duoc, Googlebot cung vay.
+            if res.rendered == "playwright":
+                return _pack("CAN_DANG_NHAP_MOI_XEM", res)
             return _pack("TUONG_DANG_NHAP", res)
         if page.get("js_unavailable"):
             return _pack("CHUA_CAI_PLAYWRIGHT", res)
@@ -405,12 +472,25 @@ def _pack(key, res):
     return key, sev, why, todo
 
 
-def bump_by_tier(sev: int, tier, tier_priority: dict) -> int:
+# Ma loi noi ve MOI TRUONG CHAY TOOL, khong noi gi ve chat luong link. Tier
+# nao khong lam chung nghiem trong hon hay nhe di, nen chung dung ngoai
+# bump_by_tier. Neu khong, mot link tier 2 (priority 1) ma tool khong doc duoc
+# vi mang nha bi day len muc NANG mau cam - trong nhu link dang hong, trong khi
+# thuc te chua do duoc gi ve no.
+MA_MOI_TRUONG = ("MANG_CUA_BAN_CHAN",)
+
+
+def bump_by_tier(sev: int, tier, tier_priority: dict, code: str = "") -> int:
     """Tier cang cao trong kim tu thap thi cung mot loi cang nghiem trong.
 
     tier_priority: {so_tier: do_uu_tien}. Tier co priority = 1 duoc nang muc len
     mot bac; tier co priority >= 4 duoc ha mot bac (chi theo doi tong quan).
+
+    Rieng cac ma trong MA_MOI_TRUONG giu nguyen muc: chung mo ta may chay tool,
+    khong mo ta link.
     """
+    if code in MA_MOI_TRUONG:
+        return sev
     try:
         p = int(tier_priority.get(int(tier), int(tier)))
     except (TypeError, ValueError):

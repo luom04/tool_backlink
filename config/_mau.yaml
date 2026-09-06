@@ -85,7 +85,15 @@ network:
   concurrency: 8           # so request song song
   per_domain_delay: 1.5    # giay nghi giua 2 request cung domain. KHONG ha duoi 1.0
   timeout: 25
+  # So lan thu LAI khi loi ket noi (ConnectError, SSL...) - loai loi that bai
+  # trong duoi mot giay nen thu lai gan nhu mien phi.
+  # Rieng TIMEOUT khong bao gio thu lai: mot lan da tra tron 'timeout' giay o
+  # tren, va link do van con mot luot nua - no duoc day sang Chromium o luot 2.
   retries: 1
+  # Router/nha mang tra ve 127.0.0.1 cho ten mien bi chan -> tool tu hoi lai
+  # dia chi that qua DNS-over-HTTPS. De true tru khi may nam trong mang noi bo
+  # dung split-DNS hop le.
+  dns_fallback: true
   verify_ssl: false
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
@@ -109,6 +117,17 @@ js:
   wait_until: domcontentloaded
   wait_after: 6000         # cho them bao nhieu mili giay cho JS ve xong noi dung
   timeout: 60000
+
+  # So tab Chromium chay song song o luot 2. Day la khau cham nhat ca dot chay.
+  #   auto  - tu do theo may: min(4, so CPU // 2). May 2 nhan ra 1 tab (dung
+  #           bang hanh vi tuan tu cu), may 12 nhan ra 4 tab.
+  #   1..6  - tu dien. Tren 6 bi ha xuong 6 kem canh bao: moi tab ton khoang
+  #           300MB RAM, ma khong nhanh them bao nhieu vi luot render van bi
+  #           per_domain_delay ham lai.
+  # De 'auto' neu tool duoc dung chung tren nhieu may cau hinh khac nhau.
+  # Cach kiem chung sau khi nang so tab: loc cot diag_code trong file ket qua,
+  # HTTP_429 phai van bang 0. Con 429 nghia la dang ban qua nhanh -> ha xuong.
+  concurrency: auto
 
 ingest:
   drop_sheets: ["sheet1", "huong dan", "template"]
@@ -139,3 +158,13 @@ output:
   dir: results
   formats: [csv, xlsx]
   filename: "{date}_{site}_tier{tier}"
+
+# ---------------------------------------------------------------------
+# Doc robots.txt de biet Googlebot co duoc phep vao tung URL khong.
+# Trang mo duoc ma bi robots.txt cam thi Google khong ghe vao -> backlink
+# khong truyen gia tri -> ma ROBOTS_CHAN_GOOGLE, tinh vao khoan doi bu.
+# Moi host chi tai robots.txt mot lan, nen chi phi rat nho.
+# ---------------------------------------------------------------------
+robots:
+  check: true      # false = bo qua buoc nay
+  timeout: 10

@@ -18,7 +18,7 @@ import asyncio
 import csv
 import sys
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, asdict, fields
 from datetime import date, datetime
 from pathlib import Path
@@ -30,6 +30,8 @@ from bs4 import BeautifulSoup
 sys.path.insert(0, str(Path(__file__).parent))
 import bl_config
 import diagnose as D
+import dnsfix
+import robotscheck
 import urlutil as U
 
 HOMEPAGE_PATHS = ("", "/", "/index.html", "/index.php", "/home", "/home/")
@@ -50,6 +52,7 @@ class Result:
     rel: str = ""
     indexable: str = ""
     rendered: str = ""        # http / playwright
+    robots: str = ""          # cho phep / bi chan / khong ro - theo robots.txt
     elapsed: str = ""
     ket_luan: str = ""        # SONG / MAT / CHECK_TAY
     cach_xu_ly: str = ""      # chi dien khi ket_luan = CHECK_TAY
@@ -160,6 +163,22 @@ def _nen_render(cfg, dom, use_js, page, http_code=None, loi_ket_noi=False):
     return True
 
 
+# Ma HTTP cho thay link da mat han - hoi robots.txt them cung khong doi duoc gi.
+CHET_HAN = ("404", "410")
+
+
+def _bo_qua_robots(res, page):
+    """Co bo qua buoc doc robots.txt cho dong nay khong?
+
+    Bo qua khi trang da chet han (404/410) hoac ten mien khong phan giai duoc -
+    tiet kiem mot request tren dung nhung host chac chan khong tra loi.
+    """
+    if res.http_code in CHET_HAN:
+        return True
+    err = (page.get("error") or "").lower()
+    return any(k in err for k in ("getaddrinfo", "name or service", "nodename", "dns"))
+
+
 def _redirect_flags(source_url, final_url, page):
     if not final_url:
         return
@@ -173,7 +192,7 @@ def _redirect_flags(source_url, final_url, page):
 
 # ------------------------------------------------------------------ chay check
 async def check_one(client, row, sem, locks, targets, js_queue, cfg, use_js,
-                    on_progress=None, quiet=False):
+                    on_progress=None, quiet=False, robots=None, vadns=None):
     res = Result(stt=row["stt"], tier=row["tier"], sheet=row["sheet"],
                  source_url=row["source_url"],
                  checked_at=datetime.now().strftime("%Y-%m-%d %H:%M"))
@@ -183,6 +202,12 @@ async def check_one(client, row, sem, locks, targets, js_queue, cfg, use_js,
     retries = int(cfg.network.get("retries", 1))
 
     async with sem:
+        # Kiem tra DNS TRUOC khi tai trang. Neu router tra ve 127.0.0.1 thi
+        # request se di vao chinh may nay - hoac bi tu choi (on ao), hoac te
+        # hon la duoc mot web server nao do tren may tra loi thay, cho ra
+        # LINK_BI_GO gia. Xem dnsfix.py.
+        if vadns is not None:
+            await vadns.dam_bao(client, dom)
         async with locks[dom]:
             for attempt in range(retries + 1):
                 try:
@@ -212,12 +237,29 @@ async def check_one(client, row, sem, locks, targets, js_queue, cfg, use_js,
                 except httpx.TimeoutException:
                     res.status, res.note = "PAGE_ERROR", "timeout"
                     page["error"] = "timeout"
+                    # KHONG thu lai sau timeout. Mot lan timeout da tra tron
+                    # network.timeout giay; ban lai y het thao tac vua that bai
+                    # hiem khi doi duoc ket qua, ma tra gia dat nhat trong ca
+                    # dot chay. Link nay van con mot luot thu nua: khoi lenh
+                    # ngay ben duoi day no sang Chromium o luot 2, va trinh
+                    # duyet that manh hon httpx lap lai nhieu.
+                    break
                 except Exception as e:
                     res.status = "PAGE_ERROR"
                     res.note = type(e).__name__
                     page["error"] = "%s: %s" % (type(e).__name__, e)[:200]
+                # Con lai la loi ket noi (ConnectError, ReadError, SSL...):
+                # that bai trong duoi mot giay nen thu lai gan nhu mien phi, va
+                # phan lon la nghen mang chop nhoang - ty le cuu duoc cao.
                 if attempt < retries:
                     await asyncio.sleep(cfg.network["per_domain_delay"])
+
+            # Va DNS roi ma van khong ket noi duoc: duong truyen dang loc theo
+            # ten mien, khong phai link chet. Danh dau de chan doan ra ma
+            # MANG_CUA_BAN_CHAN thay vi KET_NOI_TU_CHOI.
+            if (res.status == "PAGE_ERROR" and vadns is not None
+                    and vadns.bi_bat_coc(dom)):
+                page["mang_chan"] = True
 
             # Het luot thu bang httpx ma van loi ket noi: Chromium van con co
             # hoi, vi nhieu may chu chi tu choi client khong phai trinh duyet.
@@ -226,6 +268,12 @@ async def check_one(client, row, sem, locks, targets, js_queue, cfg, use_js,
                 res._queued_js = True
                 js_queue.append((res, tnorm, tdom, tlabel, page))
             await asyncio.sleep(cfg.network["per_domain_delay"])
+
+        # Hoi robots.txt SAU khi da thu tai trang, va bo qua khi trang da chet
+        # han: domain khong phan giai duoc thi robots.txt cung khong tai duoc,
+        # con 404/410 thi link mat roi, luat robots khong doi duoc ket luan.
+        if robots is not None and not _bo_qua_robots(res, page):
+            res.robots = await robots.trang_thai(client, res.source_url)
 
     res.elapsed = "%.1f" % (time.monotonic() - t0)
     if getattr(res, "_queued_js", False):
@@ -246,7 +294,7 @@ def finalize(res, page, cfg, use_js):
         res, page, cfg_js_forced=forced,
         outbound_limit=int(cfg.raw.get("thresholds", {}).get("outbound_link_limit", 150)))
     sev = D.bump_by_tier(sev, res.tier,
-                         {n: t.priority for n, t in cfg.tiers.items()})
+                         {n: t.priority for n, t in cfg.tiers.items()}, code)
     res.ket_luan, res.cach_xu_ly, res.huong_dan_check = D.verdict_of(code)
     sev = D.cap_theo_ket_luan(sev, res.ket_luan)
     res.diag_code = code
@@ -259,15 +307,199 @@ def finalize(res, page, cfg, use_js):
 
 TAI_NGUYEN_BO_QUA = ("image", "media", "font")
 
+# Duoi nguong nay coi nhu trang chua ra noi dung. Trung voi nguong TRANG_RONG
+# trong diagnose.py - de hai cho lech nhau thi tool cho them mot nhip vo ich.
+NGUONG_TRANG_RONG = 400
+
+
+async def _text_len(page_obj):
+    """So ky tu nhin thay tren trang. Loi thi tra 0 de ben goi cho them mot nhip."""
+    try:
+        return int(await page_obj.evaluate(
+            "() => document.body ? document.body.innerText.length : 0"))
+    except Exception:
+        return 0
+
 
 async def _chan_tai_nguyen_nang(route):
-    if route.request.resource_type in TAI_NGUYEN_BO_QUA:
-        await route.abort()
-    else:
-        await route.continue_()
+    # Bo try/except thi moi lan vut tab giua chung se in mot dong loi Playwright
+    # cho tung request dang bay - nhieu tab thi thanh mot bai rac tren stderr.
+    try:
+        if route.request.resource_type in TAI_NGUYEN_BO_QUA:
+            await route.abort()
+        else:
+            await route.continue_()
+    except Exception:
+        pass
 
 
-async def recheck_js(queue, cfg, use_js, on_js_progress=None, quiet=False):
+def _xen_ke_domain(queue):
+    """Rai deu cac URL cung mot domain ra khap hang doi render.
+
+    Luot render co domain lock nen nhieu URL cung domain phai xep hang. Cach
+    chia phai dat DONG THOI hai muc tieu:
+      - hai muc lien tiep khac domain, de cac worker khong cung ket o mot lock;
+      - domain lon duoc rai deu tu dau den cuoi hang doi.
+
+    Kieu vong tron (moi vong lay mot muc cua moi domain) chi dat muc tieu dau.
+    No lam can domain nho truoc roi don toan bo phan con lai cua domain lon vao
+    DUOI hang doi - dung cho tat ca worker cung ket vao nhau. Do that tren
+    tier 1: 12 muc cuoi cung gan nhu chi con network-316491.mn.co va
+    jasa-seo.mn.co, hai domain nay giu 61 link.
+
+    Nen dung vi tri tuong doi: muc thu i trong nhom n muc nam o (i+0.5)/n tren
+    truc 0..1. Nhom 31 muc trai deu ca hang doi, nhom 1 muc nam chinh giua.
+    Thu tu hang doi khong anh huong ket qua - ket qua duoc ghi nguoc ve dung
+    doi tuong Result cua no.
+    """
+    nhom = defaultdict(list)
+    for muc in queue:
+        nhom[U.domain_of(muc[0].source_url)].append(muc)
+    xep = []
+    for dom, ds in nhom.items():
+        n = len(ds)
+        for i, muc in enumerate(ds):
+            xep.append(((i + 0.5) / n, dom, i, muc))
+    xep.sort(key=lambda x: (x[0], x[1], x[2]))
+    return [x[3] for x in xep]
+
+
+def _tran_render(cfg) -> float:
+    """Tran cung cho MOT lan render, tinh bang giay.
+
+    page.goto() co tham so timeout, nhung page.content() va page.evaluate()
+    thi KHONG - API Playwright khong nhan timeout cho hai ham nay, chung cho
+    vo han. Mot trang co JS chay lien tuc (mn.co, penzu - dung nhung site
+    CLAUDE.md da ghi la "khong bao gio idle") du suc treo o do mai mai.
+
+    Worker dang treo lai dang GIU domain lock, nen cac worker khac boc phai
+    URL cung domain se ket theo. Day la cai phanh cuoi cung: qua nguong thi
+    vut tab, ghi nhan render that bai, di tiep.
+    """
+    return (int(cfg.js.get("timeout", 40000))
+            + 2 * int(cfg.js.get("wait_after", 0) or 0) + 20000) / 1000.0
+
+
+async def _tab_moi(ctx, page_obj):
+    """Vut tab hong, mo tab moi.
+
+    close() cung phai co tran: tab vua bi huy giua chung con request dang treo,
+    co truong hop close() khong bao gio tra ve.
+    """
+    try:
+        await asyncio.wait_for(page_obj.close(), 10)
+    except Exception:
+        pass
+    return await asyncio.wait_for(ctx.new_page(), 60)
+
+
+async def _doc_trang(page_obj, res, tn, td, tl, page, wait_after, timeout,
+                     wait_until):
+    """Mo mot URL bang Chromium va doc noi dung that. Ben goi boc trong tran."""
+    await page_obj.goto(res.source_url, wait_until=wait_until, timeout=timeout)
+    # Cho them mot nhip cho JS kip ve noi dung. Nhieu nen tang (penzu, notion,
+    # mn.co) tra ve khung rong o thoi diem DOM san sang.
+    if wait_after:
+        await page_obj.wait_for_timeout(wait_after)
+    # Evernote, Notion co khi den luc nay van con trang tron. Doc ngay thi tool
+    # ket luan TRANG_RONG cho mot trang thuc ra la tuong dang nhap. Cho them
+    # mot nhip nua roi doc lai - chi ton them thoi gian voi dung trang cham.
+    if wait_after and await _text_len(page_obj) < NGUONG_TRANG_RONG:
+        await page_obj.wait_for_timeout(wait_after)
+    res.rendered = "playwright"
+    res.final_url = str(page_obj.url)
+    page.pop("error", None)
+    page.pop("bi_chan", None)
+    _redirect_flags(res.source_url, res.final_url, page)
+    ok, page2 = analyse(await page_obj.content(), res.final_url, res, tn, td, tl)
+    page.update(page2)
+    if not ok:
+        res.status = "NOT_FOUND"
+
+
+async def _render_worker(ctx, hang, locks, cfg, use_js, on_js_progress, quiet):
+    """Mot tab Chromium, boc viec tu hang doi chung cho den khi het.
+
+    Moi worker giu tab rieng trong context rieng: cookie/session cua site nay
+    khong lan sang site kia. Tab chet chi anh huong dung worker do.
+    """
+    wait_after = int(cfg.js.get("wait_after", 0) or 0)
+    timeout = int(cfg.js.get("timeout", 40000))
+    delay = float(cfg.network["per_domain_delay"])
+    wait_until = cfg.js.get("wait_until", "domcontentloaded")
+    tran = _tran_render(cfg)
+    page_obj = await asyncio.wait_for(ctx.new_page(), 60)
+    try:
+        while True:
+            try:
+                res, tn, td, tl, page = hang.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            # Cung domain thi van phai xep hang va gian nhip y het luot 1.
+            # Thieu doan nay, 4 tab ban cung luc vao mot directory se an HTTP_429
+            # gia - dung thu tool duoc lam ra de tranh.
+            async with locks[U.domain_of(res.source_url)]:
+                try:
+                    # wait_for la BAT BUOC, khong phai cho chac an: page.content()
+                    # va page.evaluate() khong nhan timeout, chung cho vo han.
+                    # Worker treo o day van dang giu domain lock, keo theo moi
+                    # worker khac boc phai URL cung domain - ca luot render dung
+                    # hinh. Xem _tran_render().
+                    await asyncio.wait_for(
+                        _doc_trang(page_obj, res, tn, td, tl, page, wait_after,
+                                   timeout, wait_until), tran)
+                except Exception as e:
+                    page["error"] = "js %s: %s" % (type(e).__name__, e)[:200]
+                    page["render_that_bai"] = True
+                    res.note = ((res.note + "; " if res.note else "")
+                                + "js:%s" % type(e).__name__)
+                    # Tab vua timeout van con request nen dang treo; de nguyen thi
+                    # no keo hong ca nhung URL phia sau. Vut tab do di, mo tab moi.
+                    page_obj = await _tab_moi(ctx, page_obj)
+                await asyncio.sleep(delay)
+            finalize(res, page, cfg, use_js)
+            if on_js_progress:
+                on_js_progress(res)
+            elif not quiet:
+                print("[JS %-10s] %s" % (res.status, res.source_url[:60]),
+                      file=sys.stderr)
+    finally:
+        # Tran o day cung bat buoc: tab dang hong thi close() co the khong bao
+        # gio tra ve, va gather() se treo dung nhu loi vua sua.
+        try:
+            await asyncio.wait_for(page_obj.close(), 10)
+        except Exception:
+            pass
+
+
+def _bo_render_thua(queue, cfg, use_js):
+    """Tach khoi hang doi nhung link ma render KHONG the doi duoc ket luan.
+
+    robots.txt da duoc doc xong tu luot 1, va diagnose() chot
+    ROBOTS_CHAN_GOOGLE TRUOC moi nhanh khac (xem diagnose.py, khoi
+    'robots.txt cam'). Nghia la voi nhung dong nay, doc duoc noi dung hay
+    khong cung ra dung mot ket luan - mo Chromium chi de vut ket qua di.
+
+    Do that tren du an huthamcautienphat ngay 2026-09-06: tier 1 co 324 dong
+    robots = "bi chan", 293 dong trong so do da tra gia mo trinh duyet, va
+    ca 324 deu ra ROBOTS_CHAN_GOOGLE - khong mot dong nao doi ket luan nho
+    render. Bo han khoang nay cat ~15 phut khoi tier 1.
+
+    Tra ve (hang doi con lai, so dong da chot ngay).
+    """
+    con, chot = [], []
+    for muc in queue:
+        if getattr(muc[0], "robots", "") == "bi chan":
+            chot.append(muc)
+        else:
+            con.append(muc)
+    for res, tn, td, tl, page in chot:
+        finalize(res, page, cfg, use_js)
+    return con, len(chot)
+
+
+async def recheck_js(queue, cfg, use_js, on_js_progress=None, quiet=False,
+                     locks=None, vadns=None):
     try:
         from playwright.async_api import async_playwright
     except ImportError:
@@ -282,52 +514,53 @@ async def recheck_js(queue, cfg, use_js, on_js_progress=None, quiet=False):
             finalize(res, page, cfg, use_js)
         return False
 
-    print("\nRender lai %d URL bang Chromium..." % len(queue), file=sys.stderr)
+    so_tab = max(1, min(cfg.js_concurrency(), len(queue)))
+    if locks is None:
+        locks = defaultdict(asyncio.Lock)
+    if not quiet:
+        print("\nRender lai %d URL bang Chromium (%d tab song song)..."
+              % (len(queue), so_tab), file=sys.stderr)
+
+    hang = asyncio.Queue()
+    for muc in _xen_ke_domain(queue):
+        hang.put_nowait(muc)
+
     async with async_playwright() as pw:
-        b = await pw.chromium.launch()
-        ctx = await b.new_context(user_agent=cfg.network["user_agent"])
-        # Anh, video, font khong bao gio chua the <a>. Chan lai giup trang nang
-        # (Notion, Evernote) mo nhanh hon han va bot treo request nen.
-        await ctx.route("**/*", _chan_tai_nguyen_nang)
-        page_obj = await ctx.new_page()
-        wait_after = int(cfg.js.get("wait_after", 0) or 0)
-        timeout = int(cfg.js.get("timeout", 40000))
-        for res, tn, td, tl, page in queue:
+        # Chromium la tien trinh rieng, khong dung socket cua Python, nen
+        # bang IP da va phai truyen rieng cho no.
+        args = []
+        rule = vadns.host_resolver_rules() if vadns is not None else None
+        if rule:
+            args.append(rule)
+        b = await pw.chromium.launch(args=args)
+        try:
+            ctxs = []
+            for _ in range(so_tab):
+                ctx = await asyncio.wait_for(
+                    b.new_context(user_agent=cfg.network["user_agent"]), 60)
+                # Anh, video, font khong bao gio chua the <a>. Chan lai giup
+                # trang nang (Notion, Evernote) mo nhanh hon han, va giu RAM moi
+                # tab o muc chap nhan duoc khi chay nhieu tab cung luc.
+                await ctx.route("**/*", _chan_tai_nguyen_nang)
+                ctxs.append(ctx)
+            # return_exceptions: mot worker chet khong duoc keo sap ca luot
+            # render. Nhung dong con lai trong hang se roi vao luoi an toan
+            # cuoi run_check va duoc finalize theo du lieu luot 1.
+            loi = await asyncio.gather(
+                *[_render_worker(c, hang, locks, cfg, use_js, on_js_progress,
+                                 quiet) for c in ctxs],
+                return_exceptions=True)
+            for e in loi:
+                if isinstance(e, BaseException):
+                    print("CANH BAO: mot tab render dung giua chung: %s: %s"
+                          % (type(e).__name__, e), file=sys.stderr)
+        finally:
+            # Ket qua da tinh xong het o tren; dung de trinh duyet wedge lam
+            # treo ngay truoc buoc ghi file.
             try:
-                await page_obj.goto(res.source_url,
-                                    wait_until=cfg.js.get("wait_until", "domcontentloaded"),
-                                    timeout=timeout)
-                # Cho them mot nhip cho JS kip ve noi dung. Nhieu nen tang
-                # (penzu, notion, mn.co) tra ve khung rong o thoi diem DOM san sang.
-                if wait_after:
-                    await page_obj.wait_for_timeout(wait_after)
-                res.rendered = "playwright"
-                res.final_url = str(page_obj.url)
-                page.pop("error", None)
-                page.pop("bi_chan", None)
-                _redirect_flags(res.source_url, res.final_url, page)
-                ok, page2 = analyse(await page_obj.content(), res.final_url, res,
-                                    tn, td, tl)
-                page.update(page2)
-                if not ok:
-                    res.status = "NOT_FOUND"
-            except Exception as e:
-                page["error"] = "js %s: %s" % (type(e).__name__, e)[:200]
-                page["render_that_bai"] = True
-                res.note = (res.note + "; " if res.note else "") + "js:%s" % type(e).__name__
-                # Tab vua timeout van con request nen dang treo; de nguyen thi no
-                # keo hong ca nhung URL phia sau. Vut tab do di, mo tab moi.
-                try:
-                    await page_obj.close()
-                except Exception:
-                    pass
-                page_obj = await ctx.new_page()
-            finalize(res, page, cfg, use_js)
-            if on_js_progress:
-                on_js_progress(res)
-            elif not quiet:
-                print("[JS %-10s] %s" % (res.status, res.source_url[:60]), file=sys.stderr)
-        await b.close()
+                await asyncio.wait_for(b.close(), 30)
+            except Exception:
+                pass
     return True
 
 
@@ -341,24 +574,42 @@ async def run_check(cfg, rows, targets, use_js, on_progress=None,
     """
     sem = asyncio.Semaphore(int(cfg.network["concurrency"]))
     locks, jsq = defaultdict(asyncio.Lock), []
+    # Mot bo nho dung chung cho ca dot chay: moi host tai robots.txt dung 1 lan.
+    robots = (robotscheck.BoNhoRobots(float(cfg.robots.get("timeout", 10)))
+              if cfg.robots.get("check", True) else None)
+    vadns = dnsfix.VaDNS(bool(cfg.network.get("dns_fallback", True)))
     limits = httpx.Limits(max_connections=int(cfg.network["concurrency"]) * 2)
     async with httpx.AsyncClient(headers={"User-Agent": cfg.network["user_agent"]},
                                  timeout=float(cfg.network["timeout"]),
                                  verify=bool(cfg.network["verify_ssl"]),
                                  limits=limits) as c:
         results = await asyncio.gather(*[
-            check_one(c, r, sem, locks, targets, jsq, cfg, use_js, on_progress, quiet)
+            check_one(c, r, sem, locks, targets, jsq, cfg, use_js, on_progress,
+                      quiet, robots, vadns)
             for r in rows])
+    vadns.in_bao_cao(quiet)
+    run_check.dns_va = vadns.tom_tat()
 
     js_ok = True
+    # Loc TRUOC khi bao on_js_start, de tong tren thanh tien trinh la so lan
+    # render that su phai chay.
+    jsq, bo_qua = _bo_render_thua(jsq, cfg, use_js)
+    run_check.js_skipped_robots = bo_qua
+    if bo_qua and not quiet:
+        print("Bo qua %d lan render: robots.txt cua site da cam Googlebot, "
+              "ket luan khong doi duoc." % bo_qua, file=sys.stderr)
     if jsq:
         if on_js_start:
             on_js_start(len(jsq))
-        js_ok = await recheck_js(jsq, cfg, use_js, on_js_progress, quiet)
+        js_ok = await recheck_js(jsq, cfg, use_js, on_js_progress, quiet, locks,
+                                 vadns)
     run_check.js_available = js_ok
     for r in results:
         if not r.diag_code:
             finalize(r, getattr(r, "_page", {}), cfg, use_js)
+    # Tra socket ve nguyen trang: tien trinh nay con chay tiep cac buoc khac
+    # (doi soat, ghi chu) va khong duoc mang theo anh xa DNS cua dot check.
+    vadns.go_patch()
     return list(results)
 
 
@@ -435,7 +686,7 @@ def summary(results, cfg):
     out.append("CHOT LAI")
     out.append("  Link con      : %5d (%4.1f%%)  - trong do %d link hoan hao"
                % (d[D.V_SONG], pc(d[D.V_SONG]), d["HOAN_HAO"]))
-    out.append("  Link mat      : %5d (%4.1f%%)  - da chac chan, thay nguon moi"
+    out.append("  Link mat      : %5d (%4.1f%%)  - ke ca trang noindex, thay nguon moi"
                % (d[D.V_MAT], pc(d[D.V_MAT])))
     out.append("  Phai check tay: %5d (%4.1f%%)  - tool chua doc duoc, CHUA ket luan"
                % (d[D.V_CHECK], pc(d[D.V_CHECK])))

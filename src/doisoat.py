@@ -40,17 +40,32 @@ KHOAN_BU = [
     ("url_hong",    "URL hong / khong hop le",
      "O du lieu khong phai URL mo duoc"),
     ("chet",        "Link da chet khi kiem tra",
-     "404 / 410 / domain het han / bai bi go"),
-    ("khong_gia_tri", "Link khong truyen duoc gia tri",
-     "Trang mang the noindex - Google khong index trang nen link vo tac dung"),
+     "404 / 410 / domain het han / bai bi go / noindex / nofollow / canonical khac / "
+     "can dang nhap moi xem"),
+    ("khong_gia_tri", "Link khong truyen duoc gia tri (phu)",
+     "Ket luan la Link con nhung van dinh noindex / nofollow / canonical khac"),
+    ("sai_tang",     "Link tro sai tang",
+     "Link song va dofollow, nhung roi vao tang khac voi tang ho khai giao"),
 ]
 
+# Ma cho biet link tro khong dung tang da khai. Link van song, van dofollow,
+# van truyen gia tri - nhung vao sai cho nen khong dung duoc theo so do.
+#
+# Truoc day khoan nay CO Y bi bo ra ngoai yeu cau bu, vi so rang ta khai
+# 'targets' trong config sai chu khong phai ho dat link sai. Bang chung ngay
+# 2026-09-06 lat lai lap luan do: chinh file cua ben cung cap khai o dong tieu
+# de "Link Tang 3 tro ve Tang 2", va chinh nguoi check tay cua ta ghi ca 11/11
+# dong tab 'submiss 2.0 tang 3' la "chua dung link tang 3". Hai ben doc lap
+# cung noi mot chuyen, nen day khong con la suy doan.
+MA_SAI_TANG = ("TRO_SAI_TANG",)
+
 # Ma loi tuy van con the <a> nhung link khong truyen duoc gia tri SEO nao.
-# Ve mat bao cao ky thuat day van la "Link con" (tool nhin thay the <a>, khong
-# can mo tay xac minh). Ve mat doi soat thi khong tinh la da giao: mua backlink
-# la mua gia tri truyen ve, khong phai mua mot the <a> nam tren trang Google
-# khong bao gio doc toi.
-MA_KHONG_GIA_TRI = ("TRANG_NOINDEX",)
+# Khi la ma loi CHINH, ca ba ma nay da duoc xep thang vao "Link mat" (xem VERDICT
+# trong diagnose.py) nen roi vao khoan "chet". Danh sach duoi day chi con bat
+# truong hop chung xuat hien o cot canh_bao_them - ma chinh la loi khac nhung
+# trang van noindex / link van nofollow. Hai duong khong chong nhau: khoan nay
+# chi cong them cho nhung dong co ket luan "Link con".
+MA_KHONG_GIA_TRI = ("TRANG_NOINDEX", "NOFOLLOW", "CANONICAL_KHAC")
 
 
 # ------------------------------------------------------------- doc ket qua check
@@ -93,11 +108,16 @@ def _ket_luan(row):
 
 
 def _khong_gia_tri(row):
-    """Link con the <a> nhung trang noindex -> khong truyen gia tri SEO."""
+    """Dong ket luan "Link con" nhung trang noindex -> khong truyen gia tri."""
     if (row.get("diag_code") or "").strip() in MA_KHONG_GIA_TRI:
         return True
     them = (row.get("canh_bao_them") or "")
     return any(m in them for m in MA_KHONG_GIA_TRI)
+
+
+def _sai_tang(row):
+    """Dong ket luan "Link con" nhung tro vao tang khac voi khai bao."""
+    return (row.get("diag_code") or "").strip() in MA_SAI_TANG
 
 
 # ------------------------------------------------------------------- tong hop
@@ -115,8 +135,13 @@ def build(cfg, url="", thu_muc=None):
         v = _ket_luan(k)
         if v == D.V_SONG:
             theo_tab[r["sheet"]]["con"] += 1
+            # elif chu khong phai if: mot link vua nofollow vua sai tang van
+            # chi la MOT link thieu, dem hai lan la thoi phong yeu cau bu.
+            # Uu tien khoan nang hon - khong truyen duoc chut gia tri nao.
             if _khong_gia_tri(k):
                 theo_tab[r["sheet"]]["khong_gia_tri"] += 1
+            elif _sai_tang(k):
+                theo_tab[r["sheet"]]["sai_tang"] += 1
         elif v == D.V_MAT:
             theo_tab[r["sheet"]]["chet"] += 1
         else:
@@ -127,7 +152,8 @@ def build(cfg, url="", thu_muc=None):
         c = theo_tab.get(so["tab"], Counter())
         d = dict(so)
         d.update(con=c["con"], chet=c["chet"], check_tay=c["check_tay"],
-                 chua_check=c["chua_check"], khong_gia_tri=c["khong_gia_tri"])
+                 chua_check=c["chua_check"], khong_gia_tri=c["khong_gia_tri"],
+                 sai_tang=c["sai_tang"])
         d["bu"] = sum(d.get(k, 0) for k, _, _ in KHOAN_BU)
         d["hao_hut"] = d["tho"] - d["nhan"]
         bang.append(d)
@@ -295,6 +321,7 @@ def write_xlsx(bang, path, cfg, rows=None, file_kq=(), kq=None, trung=()):
         ("con",          "Link con", 10, None),
         ("chet",         "Link chet", 10, None),
         ("khong_gia_tri", "Noindex", 10, None),
+        ("sai_tang",     "Sai tang", 10, None),
         ("check_tay",    "Phai check tay", 13, None),
         ("bu",           "De nghi bu", 12, BU_FILL),
     ]
@@ -453,12 +480,14 @@ def _sheet_chet(wb, rows, kq):
     BU_FILL = PatternFill("solid", fgColor="FFC7CE")
 
     NOINDEX_FILL = PatternFill("solid", fgColor="FFE699")
+    SAI_TANG_FILL = PatternFill("solid", fgColor="D9E1F2")
 
     ws = wb.create_sheet("Link chet - gui ho")
     ws.append(["DANH SACH LINK KHONG DUNG DUOC - GUI KEM KHI DE NGHI BU"])
     ws.cell(row=1, column=1).font = Font(bold=True, size=13)
-    ws.append(["Gom hai nhom: link DA CHET (do) va link con nhung trang NOINDEX "
-               "nen khong truyen gia tri (vang). Moi dong deu co bang chung."])
+    ws.append(["Gom ba nhom: link DA CHET (do); link con nhung trang NOINDEX nen "
+               "khong truyen gia tri (vang); va link song nhung TRO SAI TANG so "
+               "voi tang ho khai giao (xanh). Moi dong deu co bang chung."])
     ws.cell(row=2, column=1).font = Font(italic=True, color="7F7F7F")
     ws.append([])
 
@@ -479,15 +508,18 @@ def _sheet_chet(wb, rows, kq):
             continue
         chet = _ket_luan(k) == D.V_MAT
         noindex = not chet and _khong_gia_tri(k)
-        if not (chet or noindex):
+        # Cung thu tu uu tien voi luc dem o build(): mot dong chi thuoc mot nhom.
+        sai_tang = not chet and not noindex and _sai_tang(k)
+        if not (chet or noindex or sai_tang):
             continue
-        ws.append([r["tier"], r["sheet"], r["source_url"],
-                   "Da chet" if chet else "Noindex",
+        nhom = "Da chet" if chet else ("Noindex" if noindex else "Sai tang")
+        ws.append([r["tier"], r["sheet"], r["source_url"], nhom,
                    k.get("diag_code", ""), k.get("chan_doan", ""),
                    k.get("http_code", "")])
         rn = ws.max_row
+        to = BU_FILL if chet else (NOINDEX_FILL if noindex else SAI_TANG_FILL)
         for i in range(1, len(COLS) + 1):
-            ws.cell(row=rn, column=i).fill = BU_FILL if chet else NOINDEX_FILL
+            ws.cell(row=rn, column=i).fill = to
             ws.cell(row=rn, column=i).alignment = Alignment(
                 vertical="top", wrap_text=(i == 6))
         if len(r["source_url"]) < 250:

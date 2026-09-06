@@ -120,7 +120,18 @@ network:
   concurrency: 8 # so request song song. 15-20 neu mang khoe, de bi ban IP hon
   per_domain_delay: 1.5 # giay nghi giua 2 request cung mot domain. KHONG ha duoi 1.0
   timeout: 25
-  retries: 1 # so lan thu lai khi timeout / loi ket noi
+  # So lan thu lai khi LOI KET NOI (ConnectError, SSL...) - loai that bai trong
+  # duoi mot giay nen thu lai gan nhu mien phi va hay cuu duoc.
+  # Timeout thi KHONG thu lai: da tra tron 25s o tren, ban lai y het thao tac
+  # vua that bai hiem khi doi ket qua. Link timeout van duoc thu lai bang
+  # Chromium o luot 2 - manh hon httpx lap lai nhieu.
+  retries: 1
+  # Mot so router/nha mang tra ve 127.0.0.1 cho ten mien bi chan, khien tool go
+  # cua chinh may minh va bao KET_NOI_TU_CHOI oan. Bat cai nay thi tool tu hoi
+  # lai dia chi that qua DNS-over-HTTPS. Do that ngay 2026-09-06: 24 link tren
+  # 5 ten mien (hackmd.io, medium.com, band.us, jimdosite) dinh loi nay.
+  # Dat false neu may chay trong mang noi bo dung split-DNS hop le.
+  dns_fallback: true
   verify_ssl: false # nhieu site ve tinh co chung chi het han
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
@@ -162,6 +173,21 @@ js:
   wait_after: 6000
   # Notion, Evernote nap rat cham - 40s khong du, hay gap CHUA_RENDER_DUOC.
   timeout: 60000
+  # ------------------------------------------------------------------
+  # SO TAB CHROMIUM SONG SONG o luot render - khau chiem phan lon thoi gian.
+  # Doi so o dong 'concurrency' ngay duoi day, khong phai sua code.
+  #   auto  - tu do theo may: min(4, so CPU // 2). May 2 nhan ra 1 tab.
+  #   4     - muc an toan, da chay tron 4 tier ngay 2026-09-06 (~1h30).
+  #   6     - tran cung. May nay 12 CPU / 23.7GB RAM nen thoai mai.
+  # Vi sao 6 an toan tren du an nay (do that tu lan chay 2026-09-06):
+  #   - HTTP_429 = 0 / 2691 link o muc 4 tab;
+  #   - hang doi render co rat nhieu host khac nhau nen cac tab hiem khi
+  #     tranh domain lock: tier 4 co 474 URL tren 471 host, tier 1 co
+  #     535 URL tren 114 host - deu >> 6.
+  # Muon quay ve muc cu thi doi thanh: concurrency: 4   (hoac auto)
+  # Sau khi doi, kiem chung bang cach loc cot diag_code xem HTTP_429 con 0.
+  # ------------------------------------------------------------------
+  concurrency: 6
 
 ingest:
   # Tab trong Google Sheet chua tu khoa nay se bi bo qua hoan toan.
@@ -190,6 +216,20 @@ ingest:
 
   # In canh bao khi gap URL chi co ten mien, khong co duong dan.
   warn_homepage_urls: true
+
+robots:
+  # Doc robots.txt cua tung host de biet Googlebot co duoc phep vao URL do khong.
+  # Day la cau hoi KHAC voi "tool co doc duoc trang khong": trang mo binh thuong,
+  # the <a> con nguyen, dofollow, index duoc - nhung robots.txt cam thu thap thi
+  # Google khong bao gio ghe vao, backlink khong truyen duoc gia tri nao.
+  # Vi du that trong du an nay: penzu.com co dong "Disallow: /p/", ma ca ba
+  # backlink tier 2 tren penzu deu la /p/... -> ma ROBOTS_CHAN_GOOGLE.
+  #
+  # Chi phi: moi host tai robots.txt DUNG MOT LAN roi dung lai cho moi link cung
+  # host, nen la +1 request/host chu khong phai +1 request/link.
+  # Dat false neu muon chay that nhanh va chap nhan bo sot nhom nay.
+  check: true
+  timeout: 10
 
 thresholds:
   # Trang co nhieu hon so link ra ngoai nay bi gan ma TRANG_NHIEU_LINK_RA.

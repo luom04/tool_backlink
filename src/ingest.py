@@ -56,22 +56,28 @@ def detect_source(url: str) -> str:
 
 
 # ---------------------------------------------------------------- readers
-def read_google_sheet(url: str):
+def read_google_sheet(url: str, giu_kieu: bool = False):
     """Tra ve list (ten_tab, rows) cho moi tab. rows la list cac dong,
     moi dong la list gia tri o - giu nguyen cot de con chon cot duoc."""
     sid = SHEET_ID_RE.search(url).group(1)
     export = "https://docs.google.com/spreadsheets/d/%s/export?format=xlsx" % sid
     print("Tai Google Sheet %s ..." % sid, file=sys.stderr)
-    return read_xlsx_bytes(_fetch(export))
+    return read_xlsx_bytes(_fetch(export), giu_kieu)
 
 
-def read_xlsx_bytes(blob: bytes):
+def read_xlsx_bytes(blob: bytes, giu_kieu: bool = False):
+    """giu_kieu=True: giu nguyen kieu du lieu goc (so van la so, ngay van la
+    ngay) - dung khi can dung lai file goc nguyen ven. Mac dinh ep ve chuoi
+    cho khau lam sach."""
     from openpyxl import load_workbook
     wb = load_workbook(io.BytesIO(blob), read_only=True, data_only=True)
     out = []
     for ws in wb.worksheets:
-        rows = [["" if v is None else str(v) for v in row]
-                for row in ws.iter_rows(values_only=True)]
+        if giu_kieu:
+            rows = [list(row) for row in ws.iter_rows(values_only=True)]
+        else:
+            rows = [["" if v is None else str(v) for v in row]
+                    for row in ws.iter_rows(values_only=True)]
         out.append((ws.title, rows))
     wb.close()
     return out
@@ -105,10 +111,10 @@ def _split_text_by_heading(text: str):
     return groups
 
 
-def read_local(path: str):
+def read_local(path: str, giu_kieu: bool = False):
     p = Path(path)
     if p.suffix.lower() in (".xlsx", ".xlsm"):
-        return read_xlsx_bytes(p.read_bytes())
+        return read_xlsx_bytes(p.read_bytes(), giu_kieu)
     with open(p, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.reader(f))
     header = [h.lower().strip() for h in (rows[0] if rows else [])]
@@ -135,11 +141,10 @@ def _column_rule(cfg, sheet_name):
     return [bl_config.fold(c) for c in (best if isinstance(best, list) else [best])]
 
 
-def _cells_from_columns(rows, want_cols, sheet_name):
-    """Tim dong tieu de trong 10 dong dau, roi chi lay o thuoc cac cot da chon.
+def tim_cot(rows, want_cols):
+    """Do dong tieu de trong 10 dong dau -> (so_dong_tieu_de, chi_so_cot, ten_cot).
 
-    Tra ve (danh_sach_o, ten_cot_tim_duoc). Neu khong tim thay tieu de nao khop
-    thi tra ve (None, []) de goi y quay lai cach quet toan bo o.
+    Khong tim thay tieu de nao khop thi tra ve (None, [], []).
     """
     for i, row in enumerate(rows[:10]):
         idx, names = [], []
@@ -149,13 +154,25 @@ def _cells_from_columns(rows, want_cols, sheet_name):
                 idx.append(j)
                 names.append(str(v).strip())
         if idx:
-            cells = []
-            for r in rows[i + 1:]:
-                for j in idx:
-                    if j < len(r) and str(r[j]).strip():
-                        cells.append(str(r[j]))
-            return cells, names
-    return None, []
+            return i, idx, names
+    return None, [], []
+
+
+def _cells_from_columns(rows, want_cols, sheet_name):
+    """Tim dong tieu de trong 10 dong dau, roi chi lay o thuoc cac cot da chon.
+
+    Tra ve (danh_sach_o, ten_cot_tim_duoc). Neu khong tim thay tieu de nao khop
+    thi tra ve (None, []) de goi y quay lai cach quet toan bo o.
+    """
+    i, idx, names = tim_cot(rows, want_cols)
+    if i is None:
+        return None, []
+    cells = []
+    for r in rows[i + 1:]:
+        for j in idx:
+            if j < len(r) and str(r[j]).strip():
+                cells.append(str(r[j]))
+    return cells, names
 
 
 # ---------------------------------------------------------------- pipeline
@@ -172,23 +189,31 @@ def _so_moi(ten, tier, bo_qua=""):
             "trung_voi": Counter(), "nhan": 0, "domain_rieng": 0}
 
 
-def build(cfg, override_url: str = "", verbose: bool = True):
+def doc_nguon(cfg, override_url: str = "", giu_kieu: bool = False):
+    """Doc nguon GOC ve dung nguyen trang: [(ten_tab, cac_dong)].
+
+    Chua loc gi ca - giu nguyen tung tab, tung dong, tung o. build() dung ham
+    nay roi moi lam sach; ghichu.py dung chinh no de dung lai file goc.
+    """
     src_type = cfg.source_type
     url = override_url or cfg.source_url
     if override_url or src_type in ("auto", "", None):
         src_type = detect_source(url) if url else "local"
 
     if src_type == "google_sheet":
-        groups = read_google_sheet(url)
-    elif src_type == "google_doc":
-        groups = read_google_doc(url)
-    elif url and src_type == "xlsx":
-        groups = read_xlsx_bytes(_fetch(url))
-    elif url and src_type == "csv":
+        return read_google_sheet(url, giu_kieu)
+    if src_type == "google_doc":
+        return read_google_doc(url)
+    if url and src_type == "xlsx":
+        return read_xlsx_bytes(_fetch(url), giu_kieu)
+    if url and src_type == "csv":
         text = _fetch(url).decode("utf-8", "replace")
-        groups = [("import", list(csv.reader(io.StringIO(text))))]
-    else:
-        groups = read_local(cfg.source_file or cfg.master_csv)
+        return [("import", list(csv.reader(io.StringIO(text))))]
+    return read_local(cfg.source_file or cfg.master_csv, giu_kieu)
+
+
+def build(cfg, override_url: str = "", verbose: bool = True):
+    groups = doc_nguon(cfg, override_url)
 
     drop_sheets = [s.lower() for s in cfg.ingest["drop_sheets"]]
     drop_domains = [d.lower() for d in cfg.ingest["drop_domains"]]

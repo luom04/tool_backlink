@@ -5,6 +5,7 @@ Moi site la mot file YAML trong config/. Tat ca tham so truoc day hardcode
 trong checker.py (money domain, tier, concurrency, delay...) nay nam o day.
 """
 
+import os
 import re
 import sys
 import unicodedata
@@ -19,12 +20,20 @@ def fold(s: str) -> str:
     s = "".join(c for c in s if unicodedata.category(c) != "Mn")
     return s.replace("đ", "d").replace("Đ", "d").lower().strip()
 
+# Tran so tab Chromium song song. TRAN_JS_AUTO la muc che do "auto" tu chon,
+# TRAN_JS la tran cung cho ca gia tri nguoi dung tu dien.
+TRAN_JS_AUTO = 4
+TRAN_JS = 6
+
 DEFAULTS = {
     "network": {
         "concurrency": 8,
         "per_domain_delay": 1.5,
         "timeout": 25,
         "retries": 1,
+        # Router/nha mang co the tra ve 127.0.0.1 cho ten mien bi chan. Bat cai
+        # nay thi tool tu hoi lai dia chi that qua DNS-over-HTTPS. Xem dnsfix.py.
+        "dns_fallback": True,
         "verify_ssl": False,
         "user_agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
@@ -37,6 +46,10 @@ DEFAULTS = {
         "wait_until": "domcontentloaded",
         "wait_after": 6000,
         "timeout": 40000,
+        # So tab Chromium chay song song o luot render. "auto" = tu do theo may.
+        # Luot render la khau cham nhat ca dot chay (mot tab tuan tu ngon ~75%
+        # tong thoi gian), nen day la cho dang de song song nhat.
+        "concurrency": "auto",
         # Luot 1 doc HTML tho cho moi link. Link nao dinh mot trong cac tin hieu
         # duoi day thi moi mo Chromium o luot 2 - nhanh hon nhieu so voi render
         # tat ca, ma van khong bo sot trang can JS.
@@ -50,6 +63,16 @@ DEFAULTS = {
         "min_url_length": 12,
         "sheet_columns": {},
         "warn_homepage_urls": True,
+    },
+    "robots": {
+        # Doc robots.txt cua tung host de biet Googlebot co duoc phep vao URL do
+        # khong. Tra loi cau hoi khac han "tool co doc duoc trang khong": trang
+        # mo binh thuong ma bi robots.txt cam thi Google khong ghe vao, backlink
+        # khong truyen duoc gia tri nao.
+        "check": True,
+        # Moi host chi tai robots.txt mot lan roi dung lai, nen chi phi la
+        # +1 request/host chu khong phai +1 request/link.
+        "timeout": 10,
     },
     "output": {
         "dir": "results",
@@ -147,12 +170,14 @@ class Config:
         self.master_csv = src.get("master_csv", "data/backlinks_master.csv")
 
         merged = _deep_merge(DEFAULTS, {k: raw.get(k) for k in
-                                        ("network", "js", "ingest", "output")
+                                        ("network", "js", "ingest", "output",
+                                         "robots")
                                         if raw.get(k) is not None})
         self.network = merged["network"]
         self.js = merged["js"]
         self.ingest = merged["ingest"]
         self.output = merged["output"]
+        self.robots = merged["robots"]
 
         tiers_raw = raw.get("tiers") or {}
         if not tiers_raw:
@@ -179,6 +204,39 @@ class Config:
                         f"khop. Them 'money' hoac mot tang tren vao targets.")
 
         self._validate_delay()
+
+    def js_concurrency(self) -> int:
+        """So tab Chromium chay song song o luot render.
+
+        "auto" = min(TRAN_JS_AUTO, so CPU // 2). Tool nay duoc dung chung tren
+        nhieu may nen mac dinh phai an toan cho may yeu nhat: may 2 nhan ra 1
+        tab, dung bang hanh vi tuan tu cu; may 12 nhan ra 4 tab.
+
+        Tran cung TRAN_JS: moi tab ton khoang 300MB RAM. Vuot qua day khong
+        nhanh them bao nhieu vi luot render con bi domain lock ham lai, nhung
+        du de treo may nguoi khac.
+        """
+        v = self.js.get("concurrency", "auto")
+        if isinstance(v, str) and v.strip().lower() == "auto":
+            return self._js_auto()
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            print(f"CANH BAO: js.concurrency = {v!r} khong phai so - dung auto.",
+                  file=sys.stderr)
+            return self._js_auto()
+        if n < 1:
+            return 1
+        if n > TRAN_JS:
+            print(f"CANH BAO: js.concurrency = {n} vuot tran {TRAN_JS} - ha xuong "
+                  f"{TRAN_JS}. Nhieu tab hon chi ton RAM chu khong nhanh them.",
+                  file=sys.stderr)
+            return TRAN_JS
+        return n
+
+    @staticmethod
+    def _js_auto() -> int:
+        return max(1, min(TRAN_JS_AUTO, (os.cpu_count() or 2) // 2))
 
     def _validate_delay(self):
         d = self.network["per_domain_delay"]
