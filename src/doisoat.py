@@ -330,6 +330,8 @@ def write_xlsx(bang, path, cfg, rows=None, file_kq=(), kq=None, trung=()):
     for i, (_, _, w, _f) in enumerate(COLS, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
         c = ws.cell(row=hdr, column=i)
+        # tieu de bat dau bang "=" bi Excel doc thanh cong thuc -> #NAME?
+        c.data_type = "s"
         c.fill, c.font = HDR_FILL, HDR_FONT
         c.alignment = Alignment(vertical="center", wrap_text=True, horizontal="center")
     ws.row_dimensions[hdr].height = 30
