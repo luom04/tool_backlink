@@ -133,22 +133,27 @@ def ingest_table(per_sheet, unmatched, stats):
 
 
 def tier_summary_table(results_by_tier, cfg):
+    import diagnose as D
+
     t = Table(title=None, header_style="bold white on grey23")
     t.add_column("Tier", justify="center")
     t.add_column("Ten", style="dim")
     t.add_column("Tong", justify="right")
-    t.add_column("Song", justify="right", style="green")
-    t.add_column("Mat link", justify="right", style="yellow")
-    t.add_column("Loi trang", justify="right", style="red")
+    # Dem theo KET LUAN, khong theo cot status. status chi noi trinh duyet co
+    # thay the <a> hay khong - link trinh duyet thay ma Google bi bao 404 van la
+    # link mat, dem theo status thi bang nay noi nguoc voi khoi "Chot lai".
+    t.add_column("Link con", justify="right", style="green")
+    t.add_column("Link mat", justify="right", style="red")
+    t.add_column("Check tay", justify="right", style="yellow")
     t.add_column("CHET", justify="right", style="bold red")
     t.add_column("NANG", justify="right", style="dark_orange")
     for tier in sorted(results_by_tier, key=lambda x: int(x)):
         rs = results_by_tier[tier]
         lab = cfg.tiers[int(tier)].label if int(tier) in cfg.tiers else ""
-        c = lambda k: sum(1 for r in rs if r.status == k)
+        v = lambda k: sum(1 for r in rs if (r.ket_luan or D.V_CHECK) == k)
         m = lambda k: sum(1 for r in rs if r.muc_do == k)
-        t.add_row(str(tier), lab[:34], str(len(rs)), str(c("FOUND")),
-                  str(c("NOT_FOUND")), str(c("PAGE_ERROR")),
+        t.add_row(str(tier), lab[:34], str(len(rs)), str(v(D.V_SONG)),
+                  str(v(D.V_MAT)), str(v(D.V_CHECK)),
                   str(m("CHET")), str(m("NANG")))
     return t
 

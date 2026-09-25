@@ -1,20 +1,67 @@
 # =====================================================================
 # FILE MAU - copy sang config/<ten-site>.yaml roi sua.
-# Moi dong duoi day deu co the doi ma khong phai dong vao code trong src/.
+#
+# Neu ben cung cap link dat ten tab theo QUY UOC o ngay duoi day thi moi du
+# an moi chi phai sua DUNG 3 DONG (khoi "SUA 3 DONG NAY"). Toan bo phan
+# 'tiers' va 'ingest' giu nguyen, khong phai dong vao, khong phai sua Python.
 # =====================================================================
 
+
+# ---------------------------------------------------------------------
+# QUY UOC DAT TEN - COPY NGUYEN KHOI NAY GUI CHO BEN CUNG CAP LINK
+# ---------------------------------------------------------------------
+# 1. TEN TAB (ten trang tinh): bat dau bang chu TANG va so tang. Het.
+#
+#       TANG 1        TANG 2        TANG 3        TANG 4
+#
+#    Mot tang co nhieu tab thi viet them gi cung duoc o phia sau - tool khong
+#    doc toi phan do, no chi do dung hai chu "TANG <so>" o dau ten:
+#
+#       TANG 1 - GUEST POST
+#       TANG 1 - BAO PR
+#       TANG 4 - BLOG COMMENT 2
+#
+#    - Viet "TIER 1" thay cho "TANG 1" cung duoc.
+#    - KHONG danh dau tieng Viet trong ten tab.
+#    - Moi ten tab chi duoc nhac DEN MOT tang. Tab tang 3 day link ve tang 2
+#      van dat la "TANG 3", TUYET DOI khong viet "TANG 3 day TANG 2" - ten co
+#      hai so tang se bi gan nham.
+#    - Tab KHONG chua link (huong dan, bang gia, tong hop) dat ten khong co
+#      chu TANG. Tool se bo qua va in mot dong canh bao - dung nhu vay.
+#
+# 2. COT DU LIEU: dong dau tien cua tab la dong tieu de. Ten cot chuan:
+#
+#       LINK BACKLINK   (bat buoc)  URL cua trang co dat backlink
+#       ANCHOR          (tuy chon)  anchor text da dat
+#       LINK DICH       (tuy chon)  URL ma backlink tro toi
+#       NGAY DANG       (tuy chon)  ngay dat link
+#       GHI CHU         (tuy chon)
+#
+#    - Moi backlink mot DONG. Khong nhet hai link vao hai cot cua cung mot dong.
+#    - Chi cot LINK BACKLINK duoc chua URL bai dang. Cac cot kieu "Ten mien" /
+#      "Trang chu" neu co thi tool bo qua, khong tinh la backlink.
+#    - Hien tool chi doc cot LINK BACKLINK. Ba cot con lai de danh cho ban
+#      nang cap sau (so khop anchor, do tuoi tho link) - cu dien san tu bay gio.
+#
+# 3. CHIA SE: Google Sheet phai o che do "Anyone with the link - Viewer",
+#    neu khong Google tra 403 va tool dung ngay o buoc nap du lieu.
+# ---------------------------------------------------------------------
+
+
+# =====================================================================
+# SUA 3 DONG NAY - phan con lai cua file giu nguyen
+# =====================================================================
 site:
-  # Ten ngan, dung de dat ten file ket qua. Khong dau, khong khoang trang.
+  # (1) Ten ngan, dung de dat ten file ket qua. Khong dau, khong khoang trang.
   name: tensite
 
-  # Domain chinh can nhan backlink. Khong can https://, khong can www.
+  # (2) Domain chinh can nhan backlink. Khong can https://, khong can www.
   money_domain: tensite.com
 
-  # Cac URL dich cu the trong ke hoach. De trong = chi can tro dung domain la du.
-  # Neu khai bao, link tro dung domain nhung sai URL se bi gan ma SAI_URL_DICH.
-  target_urls:
-    - https://tensite.com/trang-dich-chinh
-    - https://tensite.com/trang-dich-phu
+  # De trong = chi can link tro dung domain la duoc tinh la dat.
+  # Chi khai khi ke hoach yeu cau tro dung mot so URL cu the: luc do link tro
+  # dung domain nhung sai URL se bi gan ma SAI_URL_DICH.
+  target_urls: []
 
   # Domain khac cung thuoc so huu (domain phu, .vn, .net...). Link tro ve day
   # cung duoc tinh la tro ve money site.
@@ -26,16 +73,31 @@ source:
   # xlsx / csv   - link tai truc tiep toi file
   # local        - doc file da co san trong may (khai bao o 'file' hoac 'master_csv')
   type: google_sheet
+
+  # (3) Dan link Google Sheet ben cung cap gui. Day la thu duy nhat thay doi
+  #     giua cac dot chay cua cung mot du an.
   url: "https://docs.google.com/spreadsheets/d/XXXXXXXXXXXX/edit"
   file: ""
-  # Noi ghi ket qua sau khi lam sach. Day la file ma checker doc vao.
-  master_csv: data/tensite_master.csv
+
+  # Noi ghi du lieu da lam sach - checker doc file nay. {site} tu thay bang
+  # site.name o tren, nen khong phai sua tay va hai du an khong ghi de nhau.
+  master_csv: data/{site}_master.csv
+# =====================================================================
+
 
 # ---------------------------------------------------------------------
-# Kim tu thap. Bao nhieu tang cung duoc, khong bat buoc phai 4.
+# Kim tu thap. GIU NGUYEN neu ben cung cap dat ten tab dung quy uoc.
 #
-#   targets: money           - tang nay tro thang ve money site
-#   targets: "tier:N"        - tang nay tro ve tap URL cua tier N
+# Ten tab co ghi thang so tang ("TANG 2", "Tier 2") thi tool lay luon so do,
+# khong can 'match'. Khai bao duoi day chi la luoi du phong.
+#
+# Vi sao khong them "web 2.0", "bookmark", "guest post" vao 'match': khi ten tab
+# KHONG co so tang, tool chon tu khoa KHOP DAI NHAT, nen mot tab "Submiss Web
+# 2.0" cua tang 3 se bi keo ve tier 2. Giu 'match' chi co token tang thi khong
+# bao gio dung do - va khong phai sua config cho tung du an.
+#
+#   targets: money             - tang nay tro thang ve money site
+#   targets: "tier:N"          - tang nay tro ve tap URL cua tier N
 #   targets: [money, "tier:2"] - khai NHIEU dich: tro vao bat ky dich nao trong
 #                      danh sach deu duoc tinh la con song. Dich DAU TIEN la
 #                      dich ky vong; link roi vao dich khac van la "Link con"
@@ -43,43 +105,52 @@ source:
 #                      giay dang lech so voi thuc te. Cot "Khop tang" trong file
 #                      ket qua ghi ro tung link roi vao dau.
 #                      Link chi duoc tro LEN tang tren hoac trong CUNG mot tang.
-#   match            - tu khoa nhan dien ten tab / ten nhom trong nguon.
-#                      So khop khong phan biet hoa thuong va khong phan biet dau
-#                      tieng Viet. Tu khoa dai hon thang, nen "submiss web 2.0"
-#                      se thang "web 2.0" khi ca hai cung khop.
 #   priority         - 1 la quan trong nhat. Anh huong toi muc do to mau:
 #                      priority 1     -> nang muc nghiem trong len mot bac
 #                      priority >= 4  -> ha xuong mot bac (chi theo doi tong quan)
 #   js: true/false   - ep bat/tat render JavaScript cho rieng tang nay
+#   label            - CHI de in ra man hinh va tieu de bang ket qua. Khong
+#                      tham gia nhan dien tab, sua thoai mai, dai ngan tuy y.
+#
+# Du an it tang hon thi cu de nguyen: tang nao khong co tab tuong ung se ra
+# 0 link, khong gay loi. Muon bang ket qua gon thi xoa han muc do di.
 # ---------------------------------------------------------------------
 tiers:
   1:
-    label: "Tier 1 - bai dang chat luong, tro thang money site"
-    targets: money
-    priority: 1
-    match: ["tier 1", "tang 1", "guest post", "bao pr"]
-
-  2:
-    label: "Tier 2 - web 2.0 tro thang money site"
+    label: "Tang 1 - tro thang money site"
     targets: money
     priority: 2
-    match: ["tier 2", "tang 2", "web 2.0"]
+    match: ["tang 1", "tier 1"]
+
+  2:
+    label: "Tang 2 - tro thang money site"
+    # Dat priority 1 khi cac tang duoi deu do don vao tap URL nay: mat mot URL
+    # tang 2 la mat ca mot nhanh phia duoi.
+    targets: money
+    priority: 1
+    match: ["tang 2", "tier 2"]
 
   3:
-    label: "Tier 3 - tro ve tier 2"
+    label: "Tang 3 - tro ve tang 2"
     # Khai them 'money' vi thuc te rat nhieu link tang duoi tro thang money site.
     # Khai mot dich duy nhat se khien chung bi bao la MAT LINK oan.
     targets: ["tier:2", money]
     priority: 4
-    match: ["tier 3", "tang 3", "bookmark", "profile"]
+    match: ["tang 3", "tier 3"]
 
-# --- vi du them: mo hinh 2 tang phang, khong co tier 3/4 ---------------
+  4:
+    label: "Tang 4 - tro ve tang 3"
+    targets: ["tier:3", "tier:2", money]
+    priority: 4
+    match: ["tang 4", "tier 4"]
+
+# --- vi du them: mo hinh 2 tang phang, khong co tang 3/4 --------------
 #  tiers:
-#    1: { label: "Bao chi", targets: money, priority: 1, match: ["bao", "pr"] }
-#    2: { label: "Ve tinh", targets: money, priority: 2, match: ["ve tinh"] }
+#    1: { label: "Bao chi", targets: money, priority: 1, match: ["tang 1", "tier 1"] }
+#    2: { label: "Ve tinh", targets: money, priority: 2, match: ["tang 2", "tier 2"] }
 
-# --- vi du them: nhieu tang cung tro ve tier 1 -------------------------
-#    3: { label: "Day tier 1", targets: tier:1, priority: 3, match: ["day t1"] }
+# --- vi du them: tang 3 day thang len tang 1 --------------------------
+#    3: { label: "Day tang 1", targets: ["tier:1", money], priority: 3, match: ["tang 3", "tier 3"] }
 
 network:
   concurrency: 8           # so request song song
@@ -130,18 +201,28 @@ js:
   concurrency: auto
 
 ingest:
+  # Tab khong chua link. CHU Y: so khop theo CHUOI CON va KHONG bo dau tieng
+  # Viet - dung them tu ngan hoac tu co the xuat hien trong ten tab that
+  # (them "tong hop" se lam bay luon tab "TANG 2 - TONG HOP WEB 2.0").
+  # Ten tab dung quy uoc thi thuong khong can khai gi o day: tab khong co chu
+  # TANG da tu dong bi bo qua, chi khac la co them mot dong canh bao.
   drop_sheets: ["sheet1", "huong dan", "template"]
   drop_domains: []
 
-  # Tab co NHIEU cot URL ma chi mot cot la backlink that thi khai bao o day,
-  # neu khong ingest se hot ca cot phu (vd cot "Ten Mien" chi la trang chu).
-  # Khoa  = tu khoa trong ten tab
+  # Quy uoc dat cot LINK BACKLINK cho phep co dinh muc nay mot lan cho moi
+  # du an: moi tab co chu TANG (hoac TIER) trong ten deu chi lay o o cot
+  # "LINK BACKLINK", bo qua cac cot URL phu nhu "Ten mien" / "Trang chu".
+  # Khoa  = tu khoa trong TEN TAB
   # Gia tri = ten cot o dong tieu de (tim trong 10 dong dau cua tab)
   # So khop khong phan biet hoa thuong, khong phan biet dau tieng Viet.
-  # Tab co 2 cot ma CA HAI deu la backlink that thi KHONG khai bao o day.
-  sheet_columns: {}
-  #  "link page rank cao": ["link dat"]
-  #  "danh sach guest post": ["url bai viet"]
+  # Khong tim thay tieu de nao khop thi tool in canh bao roi quay ve quet
+  # toan bo o - nen file cu khong dung quy uoc van chay duoc.
+  sheet_columns:
+    "tang": ["link backlink"]
+    "tier": ["link backlink"]
+  # Tab dac biet co ten cot khac thi them mot dong rieng, khoa dai hon se
+  # thang khoa "tang" o tren:
+  #  "tang 3 - bookmark": ["url dat link"]
 
   # In canh bao khi gap URL chi co ten mien, khong co duong dan - dau hieu
   # dang lay nham cot ten mien thay vi cot link.
@@ -168,3 +249,17 @@ output:
 robots:
   check: true      # false = bo qua buoc nay
   timeout: 10
+
+# ---------------------------------------------------------------------
+# Tai lai moi URL voi tu cach Googlebot. Tool KET LUAN THEO GOOGLEBOT, vi
+# Google chi truyen gia tri qua nhung gi no nhin thay:
+#   nguoi xem thay link, Google bi bao 404       -> Link mat (GOOGLE_BI_BAO_404)
+#   nguoi xem thay link, Google khong thay link  -> Link mat (AN_LINK_VOI_GOOGLE)
+#   Google thay link, nguoi dung bi chuyen di    -> Link con, ghi chu cloaking
+# Googlebot bi chan 403/429/captcha thi KHONG ket luan tu do: nhieu site chi
+# chan Googlebot gia (IP may chay tool khong phai cua Google).
+# Ton them 1 request moi URL, van xep hang theo per_domain_delay -> luot doc
+# HTML cham gan gap doi. Luot render Chromium khong doi.
+# ---------------------------------------------------------------------
+googlebot:
+  check: true

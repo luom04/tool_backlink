@@ -24,6 +24,19 @@ SOFT_404_PAT = re.compile(
     r"n(o|ộ)i\s*dung\s+(da|đã)\s+b(i|ị)\s+x(o|ó)a|no\s+longer\s+available|"
     r"da\s+b(i|ị)\s+g(o|ỡ)|deleted|removed by)", re.I)
 
+# Soft-404 nhan ra tu THAN trang, khi title van chi la ten site. Chat hon
+# SOFT_404_PAT rat nhieu (khong co "404", "deleted" tran) vi than bai viet that
+# hoan toan co the chua nhung chu do - va chi dung cho trang NGAN, khong co link.
+SOFT_404_THAN_PAT = re.compile(
+    r"(page\s+(you\s+(were|are)\s+looking\s+for|you\s+requested|could\s*n[o']?t\s+be\s+found|"
+    r"cannot\s+be\s+found|does\s*n[o']?t\s+exist|does\s+not\s+exist|not\s+found)|"
+    r"(this|the)\s+(page|post|article)\s+(is\s+)?(no\s+longer\s+available|does\s*n[o']?t\s+exist|"
+    r"does\s+not\s+exist|has\s+been\s+(removed|deleted))|"
+    r"(sorry|oops)[,!.]?\s+(we\s+)?(could\s*n[o']?t|can\s*n?[o']?t)\s+find|"
+    r"kh(o|ô)ng\s+t(i|ì)m\s+th(a|ấ)y\s+(trang|b(a|à)i)|"
+    r"(trang|b(a|à)i\s+vi(e|ế)t)\s+(n(a|à)y\s+)?kh(o|ô)ng\s+(c(o|ò)n\s+)?t(o|ồ)n\s+t(a|ạ)i|"
+    r"n(o|ộ)i\s*dung\s+(da|đã)\s+b(i|ị)\s+x(o|ó)a)", re.I)
+
 PARKED_PAT = re.compile(
     r"(domain\s+(is\s+)?for\s+sale|buy\s+this\s+domain|t(e|ê)n\s+mi(e|ề)n\s+n(a|à)y\s+"
     r"(dang\s+)?(duoc\s+)?rao\s+b(a|á)n|parked\s+(free|domain)|expired\s+domain|"
@@ -134,6 +147,35 @@ CATALOG = {
     "CHUYEN_SANG_DOMAIN_KHAC": (SEV_NANG,
         "Bi chuyen sang mot ten mien hoan toan khac - site co the da doi chu.",
         "Kiem tra tay xem noi dung con khong."),
+    "VONG_LAP_CHUYEN_HUONG": (SEV_CHET,
+        "Trang chuyen huong vong tron, khong bao gio mo ra noi dung - ca nguoi "
+        "xem lan Googlebot deu khong vao duoc.",
+        "Coi nhu MAT LINK. Bao ben cung cap sua trang, hoac thay nguon moi."),
+
+    # ---- Googlebot thay khac nguoi xem
+    "GOOGLE_BI_BAO_404": (SEV_CHET,
+        "Nguoi mo trang bang trinh duyet van thay binh thuong, nhung khi "
+        "Googlebot ghe vao thi trang tra loi 404 'khong ton tai'. Google khong "
+        "bao gio thay trang nay nen link khong truyen chut gia tri nao. Day la "
+        "kieu giau trang voi rieng Google: Ahrefs, Bing va trinh duyet deu van "
+        "thay link.",
+        "Coi nhu MAT LINK, doi bu. Bang chung: dan URL vao "
+        "search.google.com/test/rich-results - cong cu cua chinh Google tai "
+        "trang tu may chu Google va se bao loi 404."),
+    "AN_LINK_VOI_GOOGLE": (SEV_CHET,
+        "Nguoi mo trang thay the <a> ve he thong cua minh, nhung trang tra cho "
+        "Googlebot KHONG co link do (xem cot 'Google thay'). Google chi tinh "
+        "nhung gi no nhin thay, nen link khong truyen gia tri.",
+        "Coi nhu MAT LINK, doi bu. Bang chung: search.google.com/test/rich-results "
+        "-> 'Xem trang da thu thap' -> Ctrl+F ten mien money site: khong co."),
+    "CLOAKING_NGUOI_DUNG": (SEV_GHICHU,
+        "Googlebot vao trang binh thuong va thay link day du - link VAN TRUYEN "
+        "GIA TRI. Nhung nguoi mo bang trinh duyet lai bi chuyen sang trang khac "
+        "hoac bao loi (cloaking: Google va nguoi xem thay hai trang khac nhau). "
+        "Xem hai cot 'Nguoi xem thay' va 'Google thay'.",
+        "Khong phai link hong, KHONG dua vao yeu cau bu. Chi ghi nhan: site "
+        "dung cloaking co rui ro bi Google phat ve sau, khong nen dau tu them "
+        "vao nguon nay."),
 
     # ---- trang song nhung khong thay link
     "LINK_BI_GO": (SEV_NANG,
@@ -208,6 +250,19 @@ CATALOG = {
     "LINK_QUA_TRUNG_GIAN": (SEV_CANHBAO,
         "Link di qua trang chuyen huong / rut gon, khong tro thang ve dich.",
         "Kiem tra xem trung gian co chan bot khong. Uu tien link tro thang."),
+    "NHANH_TREN_DA_CHET": (SEV_NANG,
+        "Link con va tro dung URL tang tren, nhung chinh URL tang tren do da "
+        "CHET (xem cot 'Dich tang tren'). Gia tri tu link nay dung lai o do, "
+        "khong chay ve money site.",
+        "Khong phai loi cua link nay, khong dua vao yeu cau bu. Sua hoac thay URL "
+        "tang tren truoc - no dang keo theo ca nhanh phia duoi."),
+    "LINK_BI_AN": (SEV_NANG,
+        "The <a> nam trong phan tu bi an (display:none, visibility:hidden, chu co "
+        "0...). Nguoi xem khong thay link; Google coi link an la vi pham, "
+        "thuong bo qua hoac phat.",
+        "Yeu cau ben cung cap dat link hien thi binh thuong. Luu y: link nam "
+        "trong tab / accordion dong san cung bi bao the nay - mo trang xem truoc "
+        "khi doi."),
     "TRANG_NHIEU_LINK_RA": (SEV_CANHBAO,
         "Trang chua qua nhieu link ra ngoai - dac trung cua trang spam/link farm.",
         "Gia tri truyen ve rat loang. Khong dau tu them vao nguon nay."),
@@ -256,6 +311,13 @@ VERDICT = {
     "LINK_QUA_TRUNG_GIAN":  (V_SONG,  ""),
     "TRANG_NHIEU_LINK_RA":  (V_SONG,  ""),
     "TRO_SAI_TANG":         (V_SONG,  ""),
+    # Googlebot thay link day du, chi nguoi xem bi dua di cho khac.
+    "CLOAKING_NGUOI_DUNG":  (V_SONG,  ""),
+    # Link tu no van song. Gia tri mat o tang tren - loi cua URL khac.
+    "NHANH_TREN_DA_CHET":   (V_SONG,  ""),
+    # Nhan ra bang style inline nen co the nham voi tab/accordion dong san.
+    # Chua du chac de tinh la mat.
+    "LINK_BI_AN":           (V_SONG,  ""),
 
     # ---------------------------------------------- chac chan mat link
     "DOMAIN_KHONG_PHAN_GIAI": (V_MAT, ""),
@@ -279,6 +341,11 @@ VERDICT = {
     "CAN_DANG_NHAP_MOI_XEM": (V_MAT,  ""),
     #   ROBOTS_CHAN_GOOGLE     robots.txt cam Googlebot vao dung duong dan nay
     "ROBOTS_CHAN_GOOGLE":   (V_MAT,   ""),
+    "VONG_LAP_CHUYEN_HUONG": (V_MAT,  ""),
+    # Tool ket luan theo Googlebot: nguoi xem thay link cung vo nghia neu chinh
+    # Google bi bao 404 hoac nhan ve trang khong co link.
+    "GOOGLE_BI_BAO_404":    (V_MAT,   ""),
+    "AN_LINK_VOI_GOOGLE":   (V_MAT,   ""),
 
     # ---------------------------------------------- chua ket luan duoc
     "CHUA_CAI_PLAYWRIGHT":  (V_CHECK, X_TOOL),
@@ -383,6 +450,9 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150):
         # thi da biet chac roi, khong can doan tu thong bao loi.
         if page.get("mang_chan"):
             key = "MANG_CUA_BAN_CHAN"
+        elif page.get("vong_lap") and "redirect" in err:
+            # Ca httpx lan Chromium (neu da thu) deu bao chuyen huong vong tron.
+            key = "VONG_LAP_CHUYEN_HUONG"
         elif "ssl" in err or "certificate" in err:
             key = "SSL_LOI"
         elif "timeout" in err or "timedout" in err:
@@ -438,6 +508,9 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150):
             return _pack("CHUA_RENDER_DUOC", res)
         if cfg_js_forced and res.rendered != "playwright":
             return _pack("CAN_BAT_JS", res)
+        if (page.get("text_len", 9999) < 1500
+                and SOFT_404_THAN_PAT.search(page.get("snippet") or "")):
+            return _pack("SOFT_404", res)
         if page.get("text_len", 9999) < 400:
             return _pack("TRANG_RONG", res)
         return _pack("LINK_BI_GO", res)
@@ -457,6 +530,12 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150):
     # Day la sai lech giua so do tren giay va thuc te, khong phai link hong.
     if page.get("sai_tang"):
         return _pack("TRO_SAI_TANG", res)
+    # Hai ma duoi dat SAU TRO_SAI_TANG du muc nang hon: doisoat.py dem khoan
+    # "sai tang" theo ma loi CHINH, day len truoc thi so bu bi hut di.
+    if page.get("nhanh_tren_chet"):
+        return _pack("NHANH_TREN_DA_CHET", res)
+    if page.get("link_bi_an"):
+        return _pack("LINK_BI_AN", res)
     if page.get("outbound", 0) > outbound_limit:
         return _pack("TRANG_NHIEU_LINK_RA", res)
     a = (res.anchor_text or "").strip()
@@ -534,6 +613,10 @@ def secondary(res, page, primary=""):
         out.append("SAI_URL_DICH")
     if page.get("sai_tang"):
         out.append("TRO_SAI_TANG")
+    if page.get("nhanh_tren_chet"):
+        out.append("NHANH_TREN_DA_CHET")
+    if page.get("link_bi_an"):
+        out.append("LINK_BI_AN")
     if page.get("via_redirect"):
         out.append("LINK_QUA_TRUNG_GIAN")
     if page.get("outbound", 0) > 150:
@@ -544,3 +627,238 @@ def secondary(res, page, primary=""):
     elif a.lower().startswith(("http://", "https://", "www.")):
         out.append("ANCHOR_LA_URL")
     return [c for c in out if c != primary]
+
+
+# =====================================================================
+# GOOGLEBOT LA CHUAN
+#
+# Tool tra loi "link co truyen gia tri SEO khong", ma Google chi truyen gia tri
+# qua nhung gi Googlebot nhin thay. Nen ngoai luot doc bang trinh duyet (goc
+# nhin NGUOI XEM), moi URL con duoc tai lai voi User-Agent Googlebot, va ket
+# luan cuoi cung di theo Googlebot:
+#
+#   Nguoi xem        Googlebot          Ket luan
+#   thay link        thay link          theo trang Googlebot nhan (OK/nofollow...)
+#   thay link        bi bao 404         GOOGLE_BI_BAO_404   - Link mat
+#   thay link        khong thay link    AN_LINK_VOI_GOOGLE  - Link mat
+#   bi chuyen di/404 thay link          CLOAKING_NGUOI_DUNG - Link con, ghi chu
+#   bi chan captcha  thay link          theo trang Googlebot nhan - Link con
+#   bat ky           bi chan 403/429    giu ket luan cua nguoi xem
+#
+# Bat doi xung co chu dich: Googlebot NHAN DUOC noi dung thi tin tuyet doi (may
+# chu that khong bao gio cho Googlebot gia xem nhieu hon Googlebot that). Con
+# Googlebot BI CHAN bang 403/429/captcha thi KHONG tin: nhieu site kiem tra IP
+# va chi chan Googlebot gia - Googlebot that van vao duoc. Rieng 404/410 thi
+# tin: chan bot gia tra 403, khong ai tra "trang khong ton tai".
+# =====================================================================
+
+G_THAY, G_404, G_AN, G_CHUYEN, G_CHAN = "thay", "404", "an", "chuyen", "chan"
+
+# Ma cua goc nhin nguoi xem cho biet ho duoc dua toi mot trang KHAC (khong phai
+# chi bi chan). Googlebot van thay link thi day moi dung la cloaking.
+MA_NGUOI_XEM_KHAC = ("LINK_BI_GO", "CHUYEN_VE_TRANG_CHU", "CHUYEN_SANG_DOMAIN_KHAC",
+                     "SOFT_404", "HTTP_404", "HTTP_410", "DOMAIN_RAO_BAN",
+                     "VONG_LAP_CHUYEN_HUONG")
+
+
+def goc_nhin_google(page):
+    """Phan loai trang Googlebot nhan duoc. None = chua hoi Googlebot."""
+    gb = (page or {}).get("gb")
+    if not gb:
+        return None
+    if gb.get("loi"):
+        return G_CHAN
+    code = gb.get("http") or 0
+    if code in (404, 410):
+        return G_404
+    if not 200 <= code < 300 or not gb.get("html"):
+        return G_CHAN
+    sig = gb.get("sig") or {}
+    blob = ((sig.get("title") or "") + " " + (sig.get("snippet") or ""))[:6000]
+    if CAPTCHA_PAT.search(blob) or LOGIN_PAT.search(blob):
+        return G_CHAN
+    if gb.get("found"):
+        return G_THAY
+    if SOFT_404_PAT.search(sig.get("title") or "") or PARKED_PAT.search(blob):
+        return G_404
+    if sig.get("redirected_off_domain") or sig.get("redirected_to_home"):
+        return G_CHUYEN
+    if sig.get("text_len", 0) < 400:
+        # Trang rong: co the la khung cho JavaScript ve noi dung. Google co
+        # render JS, HTML tho khong noi len duoc gi.
+        return G_CHAN
+    return G_AN
+
+
+def _rut_gon(url, n=48):
+    from urllib.parse import urlparse
+    u = urlparse(url or "")
+    s = (u.netloc + (u.path if u.path not in ("", "/") else "/")) or (url or "")
+    return s if len(s) <= n else s[:n - 3] + "..."
+
+
+NHAN_NGUOI_XEM = {
+    "HTTP_404": "trang bao 404",
+    "HTTP_410": "trang bao 410 (da xoa)",
+    "SOFT_404": "trang bao khong ton tai",
+    "DOMAIN_RAO_BAN": "domain dang rao ban",
+    "VONG_LAP_CHUYEN_HUONG": "chuyen huong vong tron",
+    "BI_CHAN_CAPTCHA": "bi chan captcha",
+    "HTTP_403_CHAN_BOT": "bi chan (HTTP 403)",
+    "HTTP_401": "doi dang nhap (HTTP 401)",
+    "HTTP_429": "bi gioi han toc do (HTTP 429)",
+    "HTTP_5XX": "may chu dang loi (5xx)",
+    "TUONG_DANG_NHAP": "doi dang nhap",
+    "CAN_DANG_NHAP_MOI_XEM": "doi dang nhap",
+    "DOMAIN_KHONG_PHAN_GIAI": "ten mien khong ton tai",
+    "KET_NOI_TU_CHOI": "khong ket noi duoc",
+    "TIMEOUT": "khong phan hoi (timeout)",
+    "SSL_LOI": "loi chung chi SSL",
+    "MANG_CUA_BAN_CHAN": "mang may chay tool chan",
+    "KHONG_PHAI_HTML": "khong phai trang web",
+    "CHUA_RENDER_DUOC": "chua doc duoc noi dung",
+    "CHUA_CAI_PLAYWRIGHT": "chua doc duoc noi dung",
+    "CAN_BAT_JS": "chua doc duoc noi dung",
+    "TRANG_RONG": "trang trong",
+    "KHONG_RO": "khong doc duoc",
+}
+
+
+def nhan_nguoi_xem(res, page, key):
+    """Nguoi mo trang bang trinh duyet thay gi - mot cum tu ngan."""
+    if page.get("redirected_off_domain") or page.get("redirected_to_home"):
+        return "bi chuyen sang " + _rut_gon(res.final_url)
+    if res.status == "FOUND":
+        return "thay link"
+    if key in NHAN_NGUOI_XEM:
+        return NHAN_NGUOI_XEM[key]
+    if res.status == "NOT_FOUND":
+        return "khong thay link"
+    if res.http_code:
+        return "trang loi HTTP %s" % res.http_code
+    return "khong vao duoc trang"
+
+
+def nhan_googlebot(res, page, g):
+    """Googlebot thay gi - mot cum tu ngan."""
+    if getattr(res, "robots", "") == "bi chan":
+        return "bi robots.txt cam vao"
+    gb = page.get("gb") or {}
+    if g is None:
+        ly_do = page.get("gb_bo_qua")
+        return "chua hoi - %s" % ly_do if ly_do else "chua hoi"
+    if g == G_THAY:
+        phu = []
+        if any(r in (gb.get("rel") or "").lower() for r in NOFOLLOW_REL):
+            phu.append("nofollow")
+        if gb.get("indexable") == "no":
+            phu.append("canonical khac" if "canonical" in (gb.get("note") or "")
+                       else "noindex")
+        return "thay link" + (" (%s)" % ", ".join(phu) if phu else "")
+    if g == G_404:
+        code = gb.get("http")
+        return "bi bao %s" % code if code in (404, 410) else "bi bao khong ton tai"
+    if g == G_CHUYEN:
+        return "bi chuyen sang " + _rut_gon(gb.get("final_url"))
+    if g == G_AN:
+        if gb.get("desktop_found"):
+            return "khong thay link (ban dien thoai)"
+        return "khong thay link"
+    if gb.get("loi"):
+        return "khong ro - %s" % gb["loi"]
+    code = gb.get("http") or 0
+    if code and not 200 <= code < 300:
+        return "khong ro - bi chan HTTP %s" % code
+    if code and not gb.get("html"):
+        return "khong ro - khong phai trang web"
+    sig = gb.get("sig") or {}
+    blob = ((sig.get("title") or "") + " " + (sig.get("snippet") or ""))[:6000]
+    if CAPTCHA_PAT.search(blob) or LOGIN_PAT.search(blob):
+        return "khong ro - trang chan bot / doi dang nhap"
+    return "khong ro - trang gan nhu trong"
+
+
+def _ban_google(res, gb):
+    """Doi tuong co cung cac truong ma diagnose() doc, lay tu trang Googlebot."""
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        status="FOUND", http_code=str(gb.get("http") or ""), rendered="http",
+        robots=getattr(res, "robots", ""), tier=res.tier, source_url=res.source_url,
+        final_url=gb.get("final_url", ""), rel=gb.get("rel", ""),
+        indexable=gb.get("indexable", ""), note=gb.get("note", ""),
+        anchor_text=gb.get("anchor_text", ""), points_to=gb.get("points_to", ""),
+        khop_tang=gb.get("khop_tang", ""))
+
+
+def phan_xu(res, page, cfg_js_forced=False, outbound_limit=150):
+    """Ket luan cuoi cung cho mot dong, lay Googlebot lam chuan.
+
+    Tra ve dict:
+        code       ma loi chinh
+        view       "google" neu ket luan dua tren trang Googlebot nhan duoc
+        sig        tin hieu trang dung de liet ke canh bao phu
+        them       ma phu bo sung (vd CLOAKING_NGUOI_DUNG)
+        nguoi_xem  / googlebot   hai cum tu cho hai cot de doc
+    """
+    page = page or {}
+    key = diagnose(res, page, cfg_js_forced, outbound_limit)[0]
+    g = goc_nhin_google(page)
+    out = {"code": key, "view": None, "sig": page, "them": [],
+           "nguoi_xem": nhan_nguoi_xem(res, page, key),
+           "googlebot": nhan_googlebot(res, page, g)}
+    if g in (None, G_CHAN):
+        return out
+
+    gb = page["gb"]
+    nguoi_thay = res.status == "FOUND" and not (
+        page.get("redirected_off_domain") or page.get("redirected_to_home"))
+
+    if g == G_THAY:
+        sig = dict(gb.get("sig") or {})
+        if page.get("nhanh_tren_chet"):
+            sig["nhanh_tren_chet"] = page["nhanh_tren_chet"]
+        key_google = diagnose(_ban_google(res, gb), sig, False, outbound_limit)[0]
+        out.update(view="google", sig=sig, code=key_google)
+        if not nguoi_thay and key in MA_NGUOI_XEM_KHAC:
+            if key_google == "OK":
+                out["code"] = "CLOAKING_NGUOI_DUNG"
+            else:
+                out["them"].append("CLOAKING_NGUOI_DUNG")
+        return out
+
+    if g == G_404:
+        # Nguoi xem cung bi 404 thi giu ma HTTP_404 - khong co gi la che giau.
+        if res.http_code not in ("404", "410"):
+            out["code"] = "GOOGLE_BI_BAO_404"
+        return out
+
+    # G_AN / G_CHUYEN: Googlebot nhan trang that nhung khong co link.
+    if nguoi_thay:
+        if res.rendered == "playwright":
+            # Link do JavaScript chen vao sau: HTML tho gui cho Googlebot khong
+            # co la binh thuong, Google render JS roi moi doc. Khong ket luan.
+            out["googlebot"] = "khong ro - link chen bang JavaScript"
+        else:
+            out["code"] = "AN_LINK_VOI_GOOGLE"
+    return out
+
+
+# ------------------------------------------------------------------ yeu cau
+# Tach "phai thay link moi" voi "chi can sua link cu": mot bai 404 thi bat
+# buoc dang lai, con link nofollow / tro sai dich thi ben cung cap sua tren
+# chinh bai do la xong - re hon va nhanh hon nhieu.
+YC_THAY, YC_SUA, YC_TANG_TREN = "Thay link moi", "Sua link", "Sua tang tren"
+LOAI_YEU_CAU = {
+    "NOFOLLOW":              YC_SUA,
+    "CAN_DANG_NHAP_MOI_XEM": YC_SUA,
+    "TRO_SAI_TANG":          YC_SUA,
+    "SAI_URL_DICH":          YC_SUA,
+    "LINK_BI_AN":            YC_SUA,
+    "NHANH_TREN_DA_CHET":    YC_TANG_TREN,
+}
+
+
+def yeu_cau(code, ket_luan):
+    if code in LOAI_YEU_CAU:
+        return LOAI_YEU_CAU[code]
+    return YC_THAY if ket_luan == V_MAT else ""

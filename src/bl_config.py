@@ -20,6 +20,11 @@ def fold(s: str) -> str:
     s = "".join(c for c in s if unicodedata.category(c) != "Mn")
     return s.replace("đ", "d").replace("Đ", "d").lower().strip()
 
+# So tang viet thang trong ten tab: "TANG 2", "Tier 2", "tang 4_bookmarks",
+# "Social Bookmarks DA cao tang 3". Dau phan cach co the la khoang trang, gach
+# ngang, gach duoi hoac hai cham.
+TIER_TOKEN_RE = re.compile(r"(?:tang|tier)\s*[:\-_]?\s*([1-9])")
+
 # Tran so tab Chromium song song. TRAN_JS_AUTO la muc che do "auto" tu chon,
 # TRAN_JS la tran cung cho ca gia tri nguoi dung tu dien.
 TRAN_JS_AUTO = 4
@@ -73,6 +78,13 @@ DEFAULTS = {
         # Moi host chi tai robots.txt mot lan roi dung lai, nen chi phi la
         # +1 request/host chu khong phai +1 request/link.
         "timeout": 10,
+    },
+    "googlebot": {
+        # Tai lai moi URL voi tu cach Googlebot va ket luan theo nhung gi Google
+        # thay. Bat phat hien trang tra 404 rieng cho Google, link giau voi
+        # Google, va nguoi dung bi chuyen di trong khi Google van thay link.
+        # Ton them mot request moi URL (van xep hang theo per_domain_delay).
+        "check": True,
     },
     "output": {
         "dir": "results",
@@ -167,17 +179,22 @@ class Config:
         self.source_type = src.get("type", "csv")
         self.source_url = src.get("url", "")
         self.source_file = src.get("file", "")
-        self.master_csv = src.get("master_csv", "data/backlinks_master.csv")
+        # {site} trong duong dan duoc thay bang site.name, de file mau khai
+        # mot lan la dung cho moi du an ma khong so hai du an ghi de nhau.
+        # Giu nguyen mac dinh cu cho cac config da co san khong khai muc nay.
+        self.master_csv = src.get("master_csv", "data/backlinks_master.csv"
+                                  ).replace("{site}", self.site_name)
 
         merged = _deep_merge(DEFAULTS, {k: raw.get(k) for k in
                                         ("network", "js", "ingest", "output",
-                                         "robots")
+                                         "robots", "googlebot")
                                         if raw.get(k) is not None})
         self.network = merged["network"]
         self.js = merged["js"]
         self.ingest = merged["ingest"]
         self.output = merged["output"]
         self.robots = merged["robots"]
+        self.googlebot = merged["googlebot"]
 
         tiers_raw = raw.get("tiers") or {}
         if not tiers_raw:
@@ -245,8 +262,25 @@ class Config:
                   f"o cac tang co nhieu link chung mot domain.", file=sys.stderr)
 
     def tier_for_sheet(self, sheet: str):
-        """Tu khoa khop dai nhat thang - tranh viec 'Submiss Web 2.0 tang 3'
-        bi gan nham vao tier 2 chi vi chua chuoi 'web 2.0'."""
+        """Ten tab -> so tier.
+
+        Hai buoc, theo dung thu tu:
+
+        1. Ten tab co ghi thang so tang ("TANG 2", "Tier 2", "tang 4_bookmarks")
+           thi lay luon so do. Khai bao ro rang nhat phai thang.
+        2. Khong co thi moi xet 'match', tu khoa khop DAI NHAT thang - de
+           'Submiss Web 2.0 tang 3' khong bi keo ve tier 2 chi vi chua 'web 2.0'.
+
+        Vi sao buoc 1 phai dung truoc: file config cua du an dang chay co ca tu
+        khoa cu ("web 2.0", "backlink domain dr cao") lan token tang. Khi ben
+        cung cap doi ten tab sang quy uoc moi, "TANG 3 - WEB 2.0" se co ca hai,
+        va "web 2.0" (7 ky tu) dai hon "tang 3" (6) nen thang - tab tang 3 bi
+        gan vao tier 2. Cho token tang thang truoc thi mot file config chay
+        duoc voi ca ten tab cu lan ten tab moi, khong phai sua gi khi chuyen.
+        """
+        m = TIER_TOKEN_RE.search(fold(sheet))
+        if m and int(m.group(1)) in self.tiers:
+            return int(m.group(1))
         best, best_score = None, 0
         for n in sorted(self.tiers):
             sc = self.tiers[n].match_score(sheet)

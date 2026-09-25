@@ -10,7 +10,7 @@ tien -> xuat CSV + XLSX to mau -> so sanh voi lan chay truoc -> in bao cao.
 import asyncio
 import shlex
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
 
@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import bl_config
 import checker
 import ingest as ingest_mod
+import nhanh
 import report as report_mod
 import tui
 from tui import console, __app_name__, __version__
@@ -202,7 +203,8 @@ def _do_check_tier(cfg, all_rows, targets, tier, limit, force_js, no_js):
             total=len(rows), stat="")
 
         def fmt():
-            return ("[green]%d song[/green] [yellow]%d mat[/yellow] [red]%d loi[/red]"
+            return ("[green]%d thay link[/green] [yellow]%d khong thay[/yellow] "
+                    "[red]%d loi trang[/red]"
                     % (counts["FOUND"], counts["NOT_FOUND"], counts["PAGE_ERROR"]))
 
         def on_progress(res):
@@ -237,7 +239,39 @@ def _do_check_tier(cfg, all_rows, targets, tier, limit, force_js, no_js):
         console.print("  [dim]bo qua %d lan render — robots.txt cua site da cam "
                       "Googlebot, ket luan khong doi duoc[/dim]" % bo)
 
+    _in_googlebot(results)
     return results
+
+
+def _in_googlebot(results):
+    """Mot dong tom tat nhung cho nguoi xem va Googlebot thay khac nhau."""
+    dem = Counter(r.diag_code for r in results)
+    cloak = sum(1 for r in results if r.diag_code == "CLOAKING_NGUOI_DUNG"
+                or "CLOAKING_NGUOI_DUNG" in (r.canh_bao_them or ""))
+    phan = []
+    if dem["GOOGLE_BI_BAO_404"]:
+        phan.append("[red]%d link Google bi bao 404[/red]" % dem["GOOGLE_BI_BAO_404"])
+    if dem["AN_LINK_VOI_GOOGLE"]:
+        phan.append("[red]%d link giau voi Google[/red]" % dem["AN_LINK_VOI_GOOGLE"])
+    if phan:
+        console.print("  Googlebot: %s [dim]— nguoi xem van thay link, nhung Google "
+                      "thi khong: tinh la Link mat[/dim]" % ", ".join(phan))
+    if cloak:
+        console.print("  Googlebot: [cyan]%d link cloaking[/cyan] [dim]— Google thay "
+                      "link binh thuong, nguoi dung bi chuyen di: van la Link con, "
+                      "chi ghi chu[/dim]" % cloak)
+
+
+def _danh_dau_nhanh(cfg, rs, results_by_tier):
+    """Link song nhung URL tang tren no do vao da chet -> ghi ro, in canh bao."""
+    n = nhanh.danh_dau(rs, cfg, nhanh.ban_do(cfg, results_by_tier), checker.finalize)
+    if not n:
+        return
+    console.print("  [yellow]%d link con song nhung do vao URL tang tren DA CHET"
+                  "[/yellow] [dim]— gia tri dung lai o do. Sua cac URL nay truoc:[/dim]"
+                  % n)
+    for url, k in nhanh.top_url_chet(rs, 5):
+        console.print("    [yellow]%4d link[/yellow] → %s" % (k, url[:72]))
 
 
 def _write_outputs(cfg, results, tier_label, today, out_override=None):
@@ -279,6 +313,7 @@ def run(
     no_js: bool = typer.Option(False, "--no-js", help="Tat render JS du config bat"),
     no_diff: bool = typer.Option(False, "--no-diff", help="Bo qua buoc so sanh voi lan chay truoc"),
     no_ghichu: bool = typer.Option(False, "--no-ghichu", help="Bo qua buoc xuat file goc co chu thich"),
+    no_doisoat: bool = typer.Option(False, "--no-doisoat", help="Bo qua buoc xuat file doi soat"),
 ):
     """Chay tron goi: nap du lieu → check tung tier → xuat bao cao."""
     tui.show_banner()
@@ -339,6 +374,8 @@ def run(
         if not rs:
             continue
         results_by_tier[str(t)] = rs
+        # Tier chay theo priority nen tang tren thuong da co ket qua truoc.
+        _danh_dau_nhanh(cfg, rs, results_by_tier)
         all_results.extend(rs)
         written += _write_outputs(cfg, rs, str(t), today)
 
@@ -381,10 +418,11 @@ def run(
             console.print("  [dim]tier %s:[/dim] %s → %s" % (t, prev.name, cur.name))
             import compare as compare_mod
             old, new = compare_mod.load(str(prev)), compare_mod.load(str(cur))
-            lost = [u for u, n in new.items()
-                    if old.get(u) and old[u]["status"] == "FOUND" and n["status"] != "FOUND"]
-            back = [u for u, n in new.items()
-                    if old.get(u) and old[u]["status"] != "FOUND" and n["status"] == "FOUND"]
+            # Theo ket luan, khong theo status - xem compare.loai_thay_doi().
+            kieu = {u: compare_mod.loai_thay_doi(old[u], n)
+                    for u, n in new.items() if old.get(u)}
+            lost = [u for u, k in kieu.items() if k == "MAT_LINK"]
+            back = [u for u, k in kieu.items() if k == "KHOI_PHUC"]
             console.print("    [red]vua mat: %d[/red]   [green]vua khoi phuc: %d[/green]"
                           % (len(lost), len(back)))
             for u in lost[:8]:
@@ -397,6 +435,13 @@ def run(
     if not no_ghichu:
         console.print("\n[bold]› Buoc 5 — File goc co chu thich[/bold]")
         p = _do_ghichu(cfg)
+        if p:
+            written.append(Path(p))
+
+    # ---------- buoc 6: doc ket qua vua ghi o buoc 2 nen phai chay sau cung
+    if not no_doisoat:
+        console.print("\n[bold]› Buoc 6 — Doi soat voi ben cung cap[/bold]")
+        p = _do_doisoat(cfg)
         if p:
             written.append(Path(p))
 
@@ -432,8 +477,11 @@ def check(
     no_js: bool = typer.Option(False, "--no-js"),
 ):
     """Chi check, khong nap lai du lieu (tuong duong run --skip-ingest)."""
+    # Goi thang ham nen phai truyen du moi co: gia tri mac dinh la
+    # typer.Option (truthy), bo sot la thanh "bo qua" ngam.
+    # ghichu/doisoat deu tai lai Google Sheet nen 'check' bo qua ca hai.
     run(config_path=config_path, tier=tier, limit=limit, skip_ingest=True,
-        js=js, no_js=no_js, no_diff=False)
+        js=js, no_js=no_js, no_diff=False, no_ghichu=True, no_doisoat=True)
 
 
 @app.command()
@@ -458,18 +506,35 @@ def doisoat(
                                     help="Thu muc chua ket qua check"),
 ):
     """Doi soat voi ben cung cap: ho dua bao nhieu, ta nhan bao nhieu, doi bu bao nhieu."""
+    cfg = _load(config_path)
+    console.print("[bold]› Doi soat nguon backlink[/bold]")
+    p = _do_doisoat(cfg, url, results_dir or None, output or None)
+    if not p:
+        raise typer.Exit(code=1)
+    console.print()
+    console.print(tui.ok_panel("Doi soat xong",
+                               "File gui cho ben cung cap  →  %s" % p))
+    console.print()
+
+
+def _do_doisoat(cfg, url="", thu_muc=None, output=None):
+    """Dung file doi soat. Tra ve duong dan, hoac None neu that bai.
+
+    Giong _do_ghichu: loi o buoc nay khong duoc lam hong ca lan chay.
+    """
     import doisoat as ds_mod
 
-    cfg = _load(config_path)
-    thu_muc = results_dir or None
-
-    console.print("[bold]› Doi soat nguon backlink[/bold]")
-    with console.status("[cyan]Dang tai lai nguon goc de dem...[/cyan]", spinner="dots"):
-        try:
+    try:
+        with console.status("[cyan]Dang tai lai nguon goc de dem...[/cyan]",
+                            spinner="dots"):
             bang, rows, unmatched, file_kq, trung = ds_mod.build(cfg, url, thu_muc)
-        except SystemExit as e:
-            console.print(tui.err_panel("Khong tai duoc nguon du lieu", e))
-            raise typer.Exit(code=1)
+    except SystemExit as e:
+        console.print(tui.err_panel("Khong tai duoc nguon du lieu", e))
+        return None
+    except Exception as e:  # noqa: BLE001 - khong de hong ca lan chay
+        console.print(tui.warn_panel("Khong dung duoc file doi soat",
+                                     "%s: %s" % (type(e).__name__, e)))
+        return None
 
     console.print()
     console.print(tui.doisoat_table(bang))
@@ -498,11 +563,7 @@ def doisoat(
     out = output or str(Path(cfg.output.get("dir", "results"))
                         / ("%s_%s_doi-soat.xlsx"
                            % (date.today().isoformat(), cfg.site_name)))
-    p = ds_mod.write_xlsx(bang, out, cfg, rows, file_kq, kq, trung)
-    console.print()
-    console.print(tui.ok_panel("Doi soat xong",
-                               "File gui cho ben cung cap  →  %s" % p))
-    console.print()
+    return ds_mod.write_xlsx(bang, out, cfg, rows, file_kq, kq, trung)
 
 
 @app.command()

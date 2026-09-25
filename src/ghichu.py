@@ -90,9 +90,19 @@ def _ghi_tu_ket_qua(k):
     v = (k.get("ket_luan") or "").strip() or D.V_CHECK
     code = (k.get("diag_code") or "").strip()
     phan = [k.get("chan_doan") or ""]
+    # Tool ket luan theo Googlebot. Ghi ca hai goc nhin de nguoi doc hieu vi
+    # sao mot link "mo ra van thay" lai bi tinh la mat - va nguoc lai.
+    nx = (k.get("nguoi_xem") or "").strip()
+    gb = (k.get("googlebot") or "").strip()
+    if nx and gb:
+        phan.append("Nguoi xem thay: %s / Google thay: %s" % (nx, gb))
+    tren = (k.get("dich_tang_tren") or "").strip()
+    if tren.startswith("DA CHET"):
+        phan.append("URL tang tren %s: %s" % (tren, k.get("points_to") or ""))
     viec = (k.get("viec_can_lam") or "").strip()
     if viec:
-        phan.append("Viec can lam: " + viec)
+        yc = (k.get("yeu_cau") or "").strip()
+        phan.append("Viec can lam%s: %s" % (" (%s)" % yc if yc else "", viec))
     them = (k.get("canh_bao_them") or "").strip()
     if them:
         phan.append("Canh bao them: " + them)

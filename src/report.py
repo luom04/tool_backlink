@@ -37,30 +37,46 @@ FONT = {
 HEADER_FILL = PatternFill("solid", fgColor="305496")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 
+# Thu tu cot = thu tu nguoi doc can: ket luan -> hai goc nhin -> vi sao ->
+# phai lam gi. Cot ky thuat (HTTP, rel, cach doc...) don ve cuoi.
 COLUMNS = [
     ("stt", "STT", 6),
     ("tier", "Tier", 6),
     ("sheet", "Nhom nguon", 26),
     ("source_url", "URL nguon", 58),
-    ("status", "Trang thai", 12),
     ("ket_luan", "Ket luan", 15),
     ("muc_do", "Muc do", 11),
+    ("nguoi_xem", "Nguoi xem thay", 26),
+    ("googlebot", "Google thay", 30),
     ("diag_code", "Ma loi", 24),
     ("chan_doan", "Chan doan", 58),
     ("viec_can_lam", "Viec can lam", 52),
+    ("yeu_cau", "Yeu cau", 14),
     ("canh_bao_them", "Canh bao them", 34),
+    ("dich_tang_tren", "Dich tang tren", 22),
+    ("vi_tri_link", "Vi tri link", 12),
+    ("robots", "robots.txt", 11),
     ("http_code", "HTTP", 7),
-    ("rel", "rel", 12),
+    ("rel", "rel", 14),
     ("indexable", "Index?", 8),
     ("points_to", "Tro ve", 44),
     ("khop_tang", "Khop tang", 11),
     ("anchor_text", "Anchor text", 34),
     ("final_url", "URL cuoi", 44),
     ("rendered", "Cach doc", 11),
+    ("status", "Trang thai", 12),
     ("elapsed", "Giay", 7),
     ("note", "Ghi chu ky thuat", 30),
     ("checked_at", "Thoi diem check", 17),
 ]
+
+# Ma cho biet nguoi xem va Googlebot thay hai trang khac nhau.
+MA_LECH = ("GOOGLE_BI_BAO_404", "AN_LINK_VOI_GOOGLE", "CLOAKING_NGUOI_DUNG")
+
+
+def _lech(r):
+    return (r.diag_code in MA_LECH
+            or "CLOAKING_NGUOI_DUNG" in (getattr(r, "canh_bao_them", "") or ""))
 
 
 # mau rieng cho cot "Ket luan" - doc luot la thay ngay 3 nhom
@@ -129,6 +145,12 @@ def write_xlsx(results, path, cfg=None):
         vc.value = D.V_LABEL.get(v, v)
         vc.fill, vc.font = V_FILL[v], V_FONT[v]
 
+        # Nguoi xem va Google thay khac nhau: to dam hai o de mat bat ngay.
+        if _lech(r):
+            for key in ("nguoi_xem", "googlebot"):
+                ws.cell(row=rn, column=keys.index(key) + 1).font = Font(
+                    color="9C0006", bold=True)
+
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = "A1:%s%d" % (get_column_letter(len(COLUMNS)), ws.max_row)
 
@@ -156,7 +178,7 @@ def write_xlsx(results, path, cfg=None):
          % d["HOAN_HAO"]),
         (D.V_MAT, d[D.V_MAT],
          "Tool doc duoc trang va chac chan link khong con gia tri (404/410/bai "
-         "bi go/trang noindex).",
+         "bi go/trang noindex), hoac Googlebot khong thay link du nguoi xem van thay.",
          "KHONG can mo tay. Thay bang nguon moi."),
         (D.V_CHECK, d[D.V_CHECK],
          "Tool KHONG doc duoc noi dung that (chan bot, captcha, dang nhap, "
@@ -176,6 +198,78 @@ def write_xlsx(results, path, cfg=None):
     s.cell(row=s.max_row, column=1).font = Font(bold=True)
     s.cell(row=s.max_row, column=2).font = Font(bold=True)
     s.append([])
+
+    # ---- khoi NGUOI XEM va GOOGLE: tool ket luan theo Google, day la cho
+    # nguoi doc thay ro vi sao mot link "mo ra van thay" lai bi tinh la mat.
+    def _dem(pred):
+        return sum(1 for r in results if pred(r))
+
+    def _gb(r):
+        return getattr(r, "googlebot", "") or ""
+
+    goc = [
+        ("Google thay link binh thuong",
+         _dem(lambda r: _gb(r).startswith("thay link")),
+         "Googlebot tai duoc trang va doc thay the <a>. Ket luan dua tren "
+         "chinh trang nay.", None),
+        ("Google bi bao 404 - nguoi xem van thay",
+         _dem(lambda r: r.diag_code == "GOOGLE_BI_BAO_404"),
+         "Trang tra 404 rieng cho Googlebot. Tinh la Link mat, doi bu.", D.V_MAT),
+        ("Link bi giau voi Google",
+         _dem(lambda r: r.diag_code == "AN_LINK_VOI_GOOGLE"),
+         "Nguoi xem thay link, trang gui cho Googlebot thi khong co. Tinh la "
+         "Link mat, doi bu.", D.V_MAT),
+        ("Cloaking - Google thay, nguoi dung bi chuyen di",
+         _dem(lambda r: r.diag_code == "CLOAKING_NGUOI_DUNG"
+              or "CLOAKING_NGUOI_DUNG" in (r.canh_bao_them or "")),
+         "Google van thay link nen van la Link con. Chi ghi chu: site dung "
+         "cloaking co rui ro bi phat.", D.V_SONG),
+        ("robots.txt cam Google",
+         _dem(lambda r: _gb(r).startswith("bi robots")),
+         "Google khong duoc phep vao. Tinh la Link mat.", D.V_MAT),
+        ("Google tra loi khong ro",
+         _dem(lambda r: _gb(r).startswith("khong ro")),
+         "Googlebot bi chan 403/429, trang trong, hoac link chen bang JS. Nhieu "
+         "site chi chan Googlebot gia, nen tool giu ket luan theo nguoi xem.", None),
+        ("Chua hoi Googlebot",
+         _dem(lambda r: _gb(r).startswith("chua hoi")),
+         "Trang khong phan hoi (DNS, timeout, tu choi ket noi) - doi User-Agent "
+         "khong doi duoc gi.", None),
+    ]
+    if any(n for _t, n, _y, _v in goc[1:]) or goc[0][1]:
+        s.append(["NGUOI XEM va GOOGLE - tool ket luan theo nhung gi Google thay"])
+        s.cell(row=s.max_row, column=1).font = Font(bold=True, size=12)
+        s.append(["Tinh trang", "So link", "", "Nghia la gi", ""])
+        for c in range(1, 6):
+            s.cell(row=s.max_row, column=c).fill = HEADER_FILL
+            s.cell(row=s.max_row, column=c).font = HEADER_FONT
+        for ten, n, y, v in goc:
+            s.append([ten, n, "", y, ""])
+            if v and n:
+                for c in (1, 2, 4):
+                    s.cell(row=s.max_row, column=c).fill = V_FILL[v]
+                    s.cell(row=s.max_row, column=c).font = V_FONT[v]
+            s.cell(row=s.max_row, column=4).alignment = Alignment(
+                wrap_text=True, vertical="top")
+        s.append([])
+
+    # ---- khoi URL TANG TREN DA CHET: mot URL chet keo theo ca nhanh
+    import nhanh
+    top = nhanh.top_url_chet(results, 15)
+    if top:
+        s.append(["URL TANG TREN DA CHET - dang keo theo link tang duoi"])
+        s.cell(row=s.max_row, column=1).font = Font(bold=True, size=12)
+        s.append(["URL tang tren", "So link do vao", "", "Viec can lam", ""])
+        for c in range(1, 6):
+            s.cell(row=s.max_row, column=c).fill = HEADER_FILL
+            s.cell(row=s.max_row, column=c).font = HEADER_FONT
+        for url, n in top:
+            s.append([url, n, "", "Sua hoac thay URL nay truoc - moi link o day "
+                      "van con nhung gia tri dung lai tai URL chet.", ""])
+            for c in (1, 2):
+                s.cell(row=s.max_row, column=c).fill = FILL[2]
+                s.cell(row=s.max_row, column=c).font = FONT[2]
+        s.append([])
 
     s.append(["THEO TIER"])
     s.cell(row=s.max_row, column=1).font = Font(bold=True)
@@ -320,6 +414,37 @@ def write_xlsx(results, path, cfg=None):
         for c in range(1, 4):
             g.cell(row=g.max_row, column=c).fill = FILL[sev]
             g.cell(row=g.max_row, column=c).font = FONT[sev]
+    g.append([])
+    g.append(["HAI GOC NHIN - vi sao mo link ra van thay ma tool bao mat?"])
+    g.cell(row=g.max_row, column=1).font = Font(bold=True, size=12)
+    for ten, y in (
+        ("Nguyen tac", "Tool ket luan theo NHUNG GI GOOGLEBOT THAY, khong theo nhung "
+                       "gi nguoi mo trang thay. Google chi truyen gia tri qua trang ma "
+                       "no doc duoc."),
+        ("Nguoi xem thay", "Mo URL bang trinh duyet thuong (User-Agent Chrome)."),
+        ("Google thay", "Tai lai dung URL do voi User-Agent Googlebot. Hai cot to do "
+                        "dam la cho hai ben thay khac nhau."),
+        ("Google bi bao 404", "Nguoi xem thay link, Googlebot nhan 404 -> Link mat. "
+                              "Kiem chung: search.google.com/test/rich-results."),
+        ("Giau link voi Google", "Nguoi xem thay link, trang gui cho Googlebot khong co "
+                                 "link -> Link mat."),
+        ("Cloaking", "Googlebot thay link, nguoi dung bi chuyen di hoac bao loi -> van "
+                     "Link con, chi ghi chu."),
+        ("Khong ro", "Googlebot bi 403/429/captcha: nhieu site chi chan Googlebot GIA "
+                     "(khong phai IP cua Google), nen tool KHONG ket luan tu do va giu "
+                     "ket qua cua nguoi xem."),
+        ("Yeu cau", "'Thay link moi' = phai dang bai khac. 'Sua link' = ben cung cap "
+                    "sua ngay tren bai cu (doi dofollow, doi dich, mo cong khai). "
+                    "'Sua tang tren' = loi nam o URL tang tren."),
+        ("Dich tang tren", "URL tang tren ma link nay tro vao con song khong. 'DA CHET' "
+                           "nghia la link nay van nguyen nhung gia tri dung lai o do."),
+        ("Vi tri link", "Link nam o dau tren trang: than bai / binh luan / ho so / "
+                        "sidebar / footer / menu. Link o footer, sidebar gia tri thap "
+                        "hon link trong than bai."),
+    ):
+        g.append([ten, "", y])
+        g.cell(row=g.max_row, column=1).font = Font(bold=True)
+        g.cell(row=g.max_row, column=3).alignment = Alignment(wrap_text=True, vertical="top")
     g.append([])
     g.append(["Luu y", "", "Muc do da duoc dieu chinh theo 'priority' cua tung tier "
                           "trong file config: tier uu tien 1 bi nang muc, tier uu tien "

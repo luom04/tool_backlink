@@ -41,7 +41,7 @@ KHOAN_BU = [
      "O du lieu khong phai URL mo duoc"),
     ("chet",        "Link da chet khi kiem tra",
      "404 / 410 / domain het han / bai bi go / noindex / nofollow / canonical khac / "
-     "can dang nhap moi xem"),
+     "can dang nhap moi xem / Google bi bao 404 / link giau voi Google"),
     ("khong_gia_tri", "Link khong truyen duoc gia tri (phu)",
      "Ket luan la Link con nhung van dinh noindex / nofollow / canonical khac"),
     ("sai_tang",     "Link tro sai tang",
@@ -312,11 +312,13 @@ def write_xlsx(bang, path, cfg, rows=None, file_kq=(), kq=None, trung=()):
         ("tab",          "Tab / trang nguon", 32, None),
         ("tier",         "Tier", 6, None),
         ("tho",          "Ho dua (tho)", 12, None),
-        ("trung",        "- Trung lap", 12, TRU_FILL),
-        ("money_site",   "- Tro ve money site", 15, TRU_FILL),
-        ("url_hong",     "- URL hong", 11, TRU_FILL),
-        ("domain_loai",  "- Domain bi loai", 14, TRU_FILL),
-        ("nhan",         "= Thuc nhan", 12, NHAN_FILL),
+        # Dau (-) va (=) de trong ngoac, KHONG viet tran "- ..." / "= ...":
+        # tieu de bat dau bang "=" bi Excel doc thanh cong thuc va hien #NAME?.
+        ("trung",        "(-) Trung lap", 12, TRU_FILL),
+        ("money_site",   "(-) Tro ve money site", 15, TRU_FILL),
+        ("url_hong",     "(-) URL hong", 11, TRU_FILL),
+        ("domain_loai",  "(-) Domain bi loai", 14, TRU_FILL),
+        ("nhan",         "(=) Thuc nhan", 12, NHAN_FILL),
         ("domain_rieng", "Domain rieng", 12, None),
         ("con",          "Link con", 10, None),
         ("chet",         "Link chet", 10, None),
@@ -325,12 +327,17 @@ def write_xlsx(bang, path, cfg, rows=None, file_kq=(), kq=None, trung=()):
         ("check_tay",    "Phai check tay", 13, None),
         ("bu",           "De nghi bu", 12, BU_FILL),
     ]
-    hdr = ws.max_row + 1
+    # append TRUOC roi moi lay so dong: ws.append([]) o tren khong lam tang
+    # max_row (dong rong khong co o nao), nen "max_row + 1" se tro nham vao
+    # chinh dong rong do - dai tieu de bi to len dong trong, con dong tieu de
+    # that thi khong duoc to.
     ws.append([c[1] for c in COLS])
+    hdr = ws.max_row
     for i, (_, _, w, _f) in enumerate(COLS, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
         c = ws.cell(row=hdr, column=i)
-        # tieu de bat dau bang "=" bi Excel doc thanh cong thuc -> #NAME?
+        # Luoi an toan: neu sau nay co tieu de bat dau bang "=", openpyxl doan
+        # thanh cong thuc va Excel hien #NAME?. Ep kieu chuoi cho chac.
         c.data_type = "s"
         c.fill, c.font = HDR_FILL, HDR_FONT
         c.alignment = Alignment(vertical="center", wrap_text=True, horizontal="center")
@@ -392,6 +399,21 @@ def write_xlsx(bang, path, cfg, rows=None, file_kq=(), kq=None, trung=()):
         ws.cell(row=ws.max_row, column=c).fill = BU_FILL
         ws.cell(row=ws.max_row, column=c).font = Font(bold=True, size=12, color="9C0006")
 
+    if rows is not None and kq is not None:
+        yc = dem_yeu_cau(rows, kq)
+        if yc:
+            ws.append([])
+            ws.append(["TRONG CAC LINK CHECK RA KHONG DUNG DUOC"])
+            ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+            for ten, vi_sao in (
+                (D.YC_THAY, "Bai chet, bi go, bi giau voi Google... phai dang bai khac"),
+                (D.YC_SUA, "Ben cung cap sua ngay tren bai cu: doi sang dofollow, "
+                           "doi lai URL dich, mo che do cong khai"),
+            ):
+                if yc.get(ten):
+                    ws.append([ten, yc[ten], vi_sao])
+                    ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+
     ct, cc = cong(bang, "check_tay"), cong(bang, "chua_check")
     if ct or cc:
         ws.append([])
@@ -413,8 +435,57 @@ def write_xlsx(bang, path, cfg, rows=None, file_kq=(), kq=None, trung=()):
     if rows is not None and kq is not None:
         _sheet_chet(wb, rows, kq)
 
+    # ------------------------------------------------- sheet 4: phai check tay
+    if rows is not None and kq is not None:
+        _sheet_check_tay(wb, rows, kq)
+
     wb.save(path)
     return path
+
+
+def _nhom_bu(k):
+    """Dong ket qua nay thuoc nhom nao trong yeu cau bu - cung thu tu voi build().
+
+    Tra ve "Da chet" / "Noindex" / "Sai tang" / None.
+    """
+    if _ket_luan(k) == D.V_MAT:
+        return "Da chet"
+    if _ket_luan(k) != D.V_SONG:
+        return None
+    if _khong_gia_tri(k):
+        return "Noindex"
+    if _sai_tang(k):
+        return "Sai tang"
+    return None
+
+
+def _yeu_cau(k, nhom=None):
+    """Thay link moi hay chi can sua tren bai cu.
+
+    Nhom "Noindex" di theo ma phu: nofollow thi sua duoc, con noindex /
+    canonical khac la cau hinh ca trang, ben cung cap khong sua ho duoc -> thay.
+    File ket qua cu chua co cot yeu_cau thi suy tu ma loi.
+    """
+    nhom = nhom or _nhom_bu(k)
+    code = (k.get("diag_code") or "").strip()
+    if nhom == "Noindex":
+        ma = code + " " + (k.get("canh_bao_them") or "")
+        return D.YC_THAY if ("TRANG_NOINDEX" in ma or "CANONICAL_KHAC" in ma) else D.YC_SUA
+    if nhom == "Sai tang":
+        return D.YC_SUA
+    v = (k.get("yeu_cau") or "").strip()
+    return v or D.yeu_cau(code, _ket_luan(k)) or D.YC_THAY
+
+
+def dem_yeu_cau(rows, kq):
+    """So link check ra khong dung duoc, chia theo yeu cau."""
+    dem = Counter()
+    for r in rows:
+        k = kq.get(U.normalize(r["source_url"]))
+        nhom = _nhom_bu(k) if k else None
+        if nhom:
+            dem[_yeu_cau(k, nhom)] += 1
+    return dem
 
 
 def _sheet_trung(wb, trung):
@@ -437,8 +508,8 @@ def _sheet_trung(wb, trung):
 
     COLS = [("URL bi lap", 64), ("So lan", 8), ("Thua", 7), ("Kieu trung", 16),
             ("Tier", 8), ("Tab dat lan dau", 28), ("Cac tab lap lai", 40)]
-    hdr = ws.max_row + 1
     ws.append([c[0] for c in COLS])
+    hdr = ws.max_row
     for i, (_, w) in enumerate(COLS, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
         c = ws.cell(row=hdr, column=i)
@@ -489,14 +560,17 @@ def _sheet_chet(wb, rows, kq):
     ws.cell(row=1, column=1).font = Font(bold=True, size=13)
     ws.append(["Gom ba nhom: link DA CHET (do); link con nhung trang NOINDEX nen "
                "khong truyen gia tri (vang); va link song nhung TRO SAI TANG so "
-               "voi tang ho khai giao (xanh). Moi dong deu co bang chung."])
+               "voi tang ho khai giao (xanh). Cot 'Yeu cau' tach link phai dang "
+               "bai moi voi link chi can sua tren bai cu. Hai cot 'Nguoi xem thay' "
+               "/ 'Google thay' la bang chung khi ho noi 'mo ra van thay link'."])
     ws.cell(row=2, column=1).font = Font(italic=True, color="7F7F7F")
     ws.append([])
 
     COLS = [("Tier", 6), ("Tab nguon", 26), ("URL co van de", 62),
-            ("Nhom", 14), ("Ma loi", 22), ("Chan doan", 60), ("HTTP", 7)]
-    hdr = ws.max_row + 1
+            ("Nhom", 14), ("Yeu cau", 14), ("Ma loi", 22), ("Chan doan", 60),
+            ("Nguoi xem thay", 24), ("Google thay", 28), ("HTTP", 7)]
     ws.append([c[0] for c in COLS])
+    hdr = ws.max_row
     for i, (_, w) in enumerate(COLS, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
         c = ws.cell(row=hdr, column=i)
@@ -508,22 +582,20 @@ def _sheet_chet(wb, rows, kq):
         k = kq.get(U.normalize(r["source_url"]))
         if not k:
             continue
-        chet = _ket_luan(k) == D.V_MAT
-        noindex = not chet and _khong_gia_tri(k)
         # Cung thu tu uu tien voi luc dem o build(): mot dong chi thuoc mot nhom.
-        sai_tang = not chet and not noindex and _sai_tang(k)
-        if not (chet or noindex or sai_tang):
+        nhom = _nhom_bu(k)
+        if not nhom:
             continue
-        nhom = "Da chet" if chet else ("Noindex" if noindex else "Sai tang")
-        ws.append([r["tier"], r["sheet"], r["source_url"], nhom,
+        ws.append([r["tier"], r["sheet"], r["source_url"], nhom, _yeu_cau(k, nhom),
                    k.get("diag_code", ""), k.get("chan_doan", ""),
+                   k.get("nguoi_xem", ""), k.get("googlebot", ""),
                    k.get("http_code", "")])
         rn = ws.max_row
-        to = BU_FILL if chet else (NOINDEX_FILL if noindex else SAI_TANG_FILL)
+        to = {"Da chet": BU_FILL, "Noindex": NOINDEX_FILL}.get(nhom, SAI_TANG_FILL)
         for i in range(1, len(COLS) + 1):
             ws.cell(row=rn, column=i).fill = to
             ws.cell(row=rn, column=i).alignment = Alignment(
-                vertical="top", wrap_text=(i == 6))
+                vertical="top", wrap_text=(i == 7))
         if len(r["source_url"]) < 250:
             c = ws.cell(row=rn, column=3)
             c.hyperlink = r["source_url"]
@@ -532,6 +604,108 @@ def _sheet_chet(wb, rows, kq):
 
     if not n:
         ws.append(["", "", "Khong co link nao chet hoac noindex.", "", "", "", ""])
+        ws.cell(row=ws.max_row, column=3).font = Font(color="006100", bold=True)
+    else:
+        ws.freeze_panes = "A%d" % (hdr + 1)
+        ws.auto_filter.ref = "A%d:%s%d" % (hdr, get_column_letter(len(COLS)),
+                                           ws.max_row)
+    return ws
+
+
+def _sheet_check_tay(wb, rows, kq):
+    """Danh sach link tool CHUA ket luan duoc - phan viec con ton lai.
+
+    Khong nam trong yeu cau bu: chua doc duoc noi dung that thi chua co bang
+    chung. Sheet nay tra loi cau "con phai mo tay bao nhieu URL, va URL nao".
+
+    Nhom "Chay lai tool" xep len tren: cai dat Playwright / bat --js / gian
+    delay roi chay lai la ca cum rung mot luot, khong ton cong nguoi.
+    """
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    HDR_FILL = PatternFill("solid", fgColor="305496")
+    HDR_FONT = Font(color="FFFFFF", bold=True)
+    TOOL_FILL = PatternFill("solid", fgColor="DDEBF7")   # may lam duoc
+    NGUOI_FILL = PatternFill("solid", fgColor="FFF2CC")  # nguoi phai mo tay
+
+    ws = wb.create_sheet("Phai check tay")
+    ws.append(["DANH SACH LINK CHUA KET LUAN DUOC - PHAI KIEM TRA TAY"])
+    ws.cell(row=1, column=1).font = Font(bold=True, size=13)
+    ws.append(["Day KHONG phai link mat va KHONG tinh vao yeu cau bu - tool bi chan "
+               "bot / captcha / tuong dang nhap / timeout nen chua doc duoc noi dung "
+               "that. Lam nhom 'Chay lai tool' (xanh) truoc: chay lai mot luot la "
+               "thuong rung gan het. Nhom 'Mo trinh duyet' (vang) moi can nguoi mo "
+               "URL roi Ctrl+F tim ten mien money site."])
+    ws.cell(row=2, column=1).font = Font(italic=True, color="7F7F7F")
+    ws.append([])
+
+    # gom du lieu truoc de con dem theo nhom va theo ma loi
+    ds = []
+    for r in rows:
+        k = kq.get(U.normalize(r["source_url"]))
+        if not k or _ket_luan(k) != D.V_CHECK:
+            continue
+        cach = (k.get("cach_xu_ly") or "").strip() or D.X_NGUOI
+        ds.append((r, k, cach))
+
+    # X_TOOL len truoc, roi gom theo ma loi de xu ly ca cum mot luot
+    ds.sort(key=lambda t: (t[2] != D.X_TOOL, t[2],
+                           (t[1].get("diag_code") or ""),
+                           t[0]["tier"] or 0, t[0]["sheet"]))
+
+    if ds:
+        ws.append(["Tom tat", "So link", "Y nghia"])
+        for c in range(1, 4):
+            ws.cell(row=ws.max_row, column=c).fill = HDR_FILL
+            ws.cell(row=ws.max_row, column=c).font = HDR_FONT
+        theo_cach = Counter(cach for _r, _k, cach in ds)
+        for cach, mo_ta in ((D.X_TOOL, "May lam - chay lai tool la xong ca cum"),
+                            (D.X_NGUOI, "Nguoi lam - mo URL roi Ctrl+F tim money site")):
+            if theo_cach.get(cach):
+                ws.append([cach, theo_cach[cach], mo_ta])
+                to = TOOL_FILL if cach == D.X_TOOL else NGUOI_FILL
+                for c in range(1, 4):
+                    ws.cell(row=ws.max_row, column=c).fill = to
+        ws.append(["Ma loi nhieu nhat", "", ", ".join(
+            "%s (%d)" % (m, n) for m, n in
+            Counter((k.get("diag_code") or "?") for _r, k, _c in ds).most_common(6))])
+        ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+        ws.append([])
+
+    COLS = [("Tier", 6), ("Tab nguon", 26), ("URL phai check", 62),
+            ("Ai lam", 15), ("Ma loi", 22), ("Chan doan", 52),
+            ("Cach kiem tra", 52), ("HTTP", 7), ("Doc bang", 11), ("Robots", 10)]
+    ws.append([c[0] for c in COLS])
+    hdr = ws.max_row
+    for i, (_, w) in enumerate(COLS, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+        c = ws.cell(row=hdr, column=i)
+        c.fill, c.font = HDR_FILL, HDR_FONT
+        c.alignment = Alignment(vertical="center", wrap_text=True)
+
+    for r, k, cach in ds:
+        # huong_dan_check noi ro phai lam gi voi ma loi nay; file cu chua co cot
+        # do thi lui ve viec_can_lam.
+        huong_dan = (k.get("huong_dan_check") or "").strip()             or (k.get("viec_can_lam") or "")
+        ws.append([r["tier"], r["sheet"], r["source_url"], cach,
+                   k.get("diag_code", ""), k.get("chan_doan", ""), huong_dan,
+                   k.get("http_code", ""), k.get("rendered", ""),
+                   k.get("robots", "")])
+        rn = ws.max_row
+        to = TOOL_FILL if cach == D.X_TOOL else NGUOI_FILL
+        for i in range(1, len(COLS) + 1):
+            ws.cell(row=rn, column=i).fill = to
+            ws.cell(row=rn, column=i).alignment = Alignment(
+                vertical="top", wrap_text=(i in (6, 7)))
+        if len(r["source_url"]) < 250:
+            c = ws.cell(row=rn, column=3)
+            c.hyperlink = r["source_url"]
+            c.font = Font(color="0563C1", underline="single")
+
+    if not ds:
+        ws.append(["", "", "Khong con link nao phai check tay.", "", "", "",
+                   "", "", "", ""])
         ws.cell(row=ws.max_row, column=3).font = Font(color="006100", bold=True)
     else:
         ws.freeze_panes = "A%d" % (hdr + 1)

@@ -35,6 +35,7 @@ backlink-checker/
 │   ├── diagnose.py    biến tín hiệu thô thành mã lỗi + việc cần làm
 │   ├── report.py      xuất XLSX tô màu
 │   ├── ghichu.py      dựng lại file nguồn gốc, thêm cột chú thích tô màu
+│   ├── nhanh.py       nối các tầng: link sống nhưng URL tầng trên đã chết
 │   └── compare.py     so sánh 2 lần chạy
 └── results/           kết quả, đặt tên theo ngày
 ```
@@ -53,7 +54,7 @@ Sau khi cấu hình xong, chỉ cần một lệnh:
 Lệnh này tự làm hết: nạp dữ liệu từ Google Sheet → làm sạch → check từng tier
 **theo thứ tự `priority` trong config** (tier quan trọng nhất chạy trước) →
 xuất CSV + XLSX tô màu → so sánh với lần chạy trước → in báo cáo → dựng lại
-**file gốc có chú thích**.
+**file gốc có chú thích** → xuất **file đối soát** với bên cung cấp.
 
 Các cách gọi tương đương:
 
@@ -81,6 +82,9 @@ rồi Enter, thoát bằng `exit`).
 | `--js` / `--no-js` | Ép bật/tắt render JavaScript |
 | `--no-diff` | Bỏ bước so sánh với lần trước |
 | `--no-ghichu` | Bỏ bước xuất file gốc có chú thích (bước 5) |
+| `--no-doisoat` | Bỏ bước xuất file đối soát (bước 6) |
+
+Lệnh `check` bỏ qua cả bước 5 lẫn bước 6, vì hai bước đó phải tải lại Google Sheet.
 
 ### Lệnh con
 
@@ -116,6 +120,75 @@ khoảng 600–700, đồng thời tier 1 và 2 mới thật sự được rende
 `auto_tiers: [3, 4]` bỏ sót đúng hai tầng quan trọng nhất).
 
 Tắt bằng `js.escalate: false` để quay về cách cũ.
+
+**Trang đã trả mã 404/410 thì không mở Chromium.** Trước đây nhánh dự phòng
+"lỗi kết nối" bắt nhầm cả trang có mã HTTP. Đo trên lần chạy 2026-09-06: 29 dòng
+HTTP 404, **không dòng nào** giữ được mã `HTTP_404` — Chromium đọc trang báo lỗi
+rồi kết luận "không thấy link", 13 dòng rơi vào `TRANG_RONG` (phải check tay).
+Giờ nhánh đó chỉ áp cho lỗi không có mã HTTP, và nếu Chromium nhận 404/410 thì
+cũng giữ nguyên mã.
+
+### Googlebot là chuẩn
+
+Tool trả lời "link có truyền giá trị SEO không", mà Google chỉ truyền giá trị
+qua những gì **Googlebot nhìn thấy**. Nên ngoài lượt đọc bằng User-Agent Chrome
+(góc nhìn người xem), mỗi URL còn được tải lại với User-Agent Googlebot điện
+thoại (Google index theo bản điện thoại), và **kết luận cuối cùng đi theo
+Googlebot**. Luật nằm ở `phan_xu()` trong [diagnose.py](src/diagnose.py):
+
+| Người xem thấy | Google thấy | Kết luận |
+|---|---|---|
+| thấy link | thấy link | theo trang Googlebot nhận (OK / nofollow / noindex…) |
+| thấy link | bị báo 404 | `GOOGLE_BI_BAO_404` — Link mất |
+| thấy link | không thấy link / bị chuyển đi | `AN_LINK_VOI_GOOGLE` — Link mất |
+| bị chuyển đi / 404 / link bị gỡ | thấy link | `CLOAKING_NGUOI_DUNG` — **Link còn**, chỉ ghi chú |
+| bị chặn captcha / 403 | thấy link | theo trang Googlebot nhận — Link còn, không phải cloaking |
+| bất kỳ | bị chặn 403/429/captcha | giữ kết luận của người xem |
+
+**Bất đối xứng có chủ đích.** Googlebot *nhận được* nội dung thì tin tuyệt đối —
+máy chủ không bao giờ cho Googlebot giả xem nhiều hơn Googlebot thật. Googlebot
+*bị chặn* 403/429 thì không tin: nhiều site kiểm tra IP và chỉ chặn Googlebot
+giả, mà IP máy chạy tool không phải của Google. Riêng 404/410 thì tin: chặn bot
+giả trả 403, không ai trả "trang không tồn tại".
+
+Đo thật ngày 2026-09-17 trên 49 dòng đang ra "Link còn": **37 dòng** trả 200 cho
+Chrome, Bingbot, AhrefsBot và curl nhưng trả **404 riêng cho Googlebot** — toàn
+bộ là họ directory (`*directory*.com`) và blog farm (`blogzet.com`,
+`total-blog.com`…) ở tier 3 và 4. Tier 1, 2 không dính. Chạy lại tier 3 `-n 20`
+sau khi nâng cấp: 20/20 ra `GOOGLE_BI_BAO_404`.
+
+Bằng chứng mang đi đòi bù: dán URL vào
+[Rich Results Test](https://search.google.com/test/rich-results). Công cụ đó tải
+trang từ máy chủ Google, nên gạt được câu "chỉ chặn Googlebot giả thôi".
+
+Ba trường hợp tool cố ý **không** kết luận:
+- Link chỉ xuất hiện sau khi render JavaScript (`rendered = playwright`) mà HTML
+  thô gửi Googlebot không có — Google cũng render JS. Cột ghi
+  `khong ro - link chen bang JavaScript`.
+- Googlebot nhận trang gần như trống — có thể là khung chờ JS.
+- Người xem thấy link, bản điện thoại gửi Googlebot không có: tool hỏi thêm bản
+  máy tính. Kết luận vẫn là mất link (Google index bản điện thoại), nhưng cột
+  `googlebot` ghi `khong thay link (ban dien thoai)` để trả lời trước câu
+  "trên máy tính vẫn thấy mà".
+
+Không hỏi Googlebot khi: `robots.txt` đã cấm (kết luận không đổi), trang không
+phản hồi (DNS, timeout, từ chối kết nối), hoặc mạng máy chạy tool chặn.
+
+Chi phí: thêm 1 request mỗi URL, vẫn xếp hàng theo `per_domain_delay`, nên lượt 1
+chậm gần gấp đôi (lượt render không đổi). Tắt bằng `googlebot.check: false`.
+
+### Đọc trang: những chỗ đã vá
+
+- Chỉ thị robots đọc từ cả `<meta name="robots">`, `<meta name="googlebot">` và
+  header `X-Robots-Tag` — header viết riêng cho bot khác (`bingbot: noindex`) thì
+  bỏ qua. Trước chỉ đọc `meta robots`, hai đường kia cho ra "Link còn" sai.
+- `nofollow` / `none` cấp trang làm mọi link thành nofollow dù thẻ `<a>` không
+  có `rel`. Cột `rel` ghi rõ `nofollow toan trang (meta robots)`.
+- Trang có nhiều link về đích thì chọn link **tốt nhất** (đúng URL > sai URL,
+  dofollow > nofollow, hiện > ẩn), không lấy link đầu tiên — một link nofollow ở
+  sidebar đứng trước link dofollow trong bài từng biến cả dòng thành `NOFOLLOW`.
+- Link là ảnh thì anchor lấy từ `alt`, không còn báo `ANCHOR_RONG` oan.
+- `<base href>` được tính khi ghép href tương đối.
 
 ### Lượt render chạy song song
 
@@ -218,8 +291,14 @@ Ingest tự động làm những việc sau:
 - **khử trùng lặp toàn cục** theo dạng chuẩn hoá (bỏ www, bỏ slash cuối)
 - loại URL trỏ về chính money site (không phải backlink)
 - loại tab nằm trong `ingest.drop_sheets`
-- gán tier theo `match`, ưu tiên từ khoá dài hơn (nên `Submiss Web 2.0 tầng 3`
-  vào tier 3 chứ không rơi vào tier 2 chỉ vì chứa chuỗi `web 2.0`)
+- gán tier theo hai bước: (1) tên tab có ghi thẳng số tầng — `TANG 2`,
+  `Tier 2`, `Tang 4_Bookmarks` — thì lấy luôn số đó, khai báo rõ ràng thắng
+  trước; (2) không có thì mới xét `match`, ưu tiên từ khoá dài hơn (nên
+  `Submiss Web 2.0 tầng 3` vào tier 3 chứ không rơi vào tier 2 chỉ vì chứa
+  chuỗi `web 2.0`). Nhờ bước 1 mà **một file config chạy được với cả tên tab cũ
+  lẫn tên tab theo quy ước mới** — lúc chuyển giao không phải sửa gì. Thiếu bước
+  đó thì tab `TANG 3 - WEB 2.0` bị kéo về tier 2, vì `web 2.0` (7 ký tự) dài hơn
+  `tang 3` (6). Xem `tier_for_sheet()` trong [bl_config.py](src/bl_config.py)
 
 #### Tab có nhiều cột URL
 
@@ -306,11 +385,22 @@ Tab nguồn          Họ đưa   Trùng  Money   Nhận   Chết   Đòi bù
 Tang 4_Bookmarks      421     418      0      3      0      418
 ```
 
-Và file `results/<ngày>_<site>_doi-soat.xlsx` gồm 3 sheet:
+Và file `results/<ngày>_<site>_doi-soat.xlsx` gồm 4 sheet:
 - **Đối soát** — bảng trên + khối "ĐỀ NGHỊ BÙ LẠI" đã cộng sẵn.
 - **Link trùng** — từng URL bị lặp: số lần xuất hiện, tab đặt lần đầu, tab lặp lại,
   trùng chéo tab hay trùng trong cùng một tab.
-- **Link chết - gửi họ** — từng URL chết kèm mã lỗi và chẩn đoán, làm bằng chứng.
+- **Link chết - gửi họ** — từng URL chết kèm mã lỗi, chẩn đoán, cột **Yêu cầu**
+  (`Thay link moi` / `Sua link`) và hai cột **Người xem thấy / Google thấy** làm
+  bằng chứng khi họ nói "mở ra vẫn thấy link". Khối "ĐỀ NGHỊ BÙ LẠI" cũng tách
+  sẵn bao nhiêu link phải thay mới, bao nhiêu chỉ cần sửa trên bài cũ.
+- **Phải check tay** — từng URL tool **chưa kết luận được**, kèm mã lỗi, chẩn đoán
+  và cách kiểm tra. Đây là phần việc còn tồn, **không** nằm trong yêu cầu bù.
+  Đầu sheet có khối tóm tắt chia theo cột `Ai lam`: nhóm **Chạy lại tool** (xanh)
+  xếp trên cùng vì chạy lại một lượt là rụng cả cụm, không tốn công người; nhóm
+  **Mở trình duyệt** (vàng) mới phải mở từng URL rồi `Ctrl+F` tìm money site.
+  Sheet này trùng nội dung với sheet "Cần check tay" của file `_tier<N>.xlsx`,
+  khác ở chỗ gộp cả 4 tier vào một bảng và ghi rõ tab nguồn để đối chiếu với
+  bên cung cấp.
 
 ### Bảng trùng lặp giữa các tab
 
@@ -339,7 +429,7 @@ là "lặp lại" phụ thuộc vào thứ tự tab trong Google Sheet.
 | Link giao trùng | Cùng một URL đếm hai lần, chỉ tính được một |
 | Trỏ về money site | Đó là link của chính mình, không phải backlink |
 | URL hỏng | Ô dữ liệu không phải URL mở được |
-| Chết khi kiểm tra | 404 / 410 / domain hết hạn / bài bị gỡ / **noindex** / **nofollow** / **canonical khác** / **cần đăng nhập mới xem** / **robots.txt chặn Google** |
+| Chết khi kiểm tra | 404 / 410 / domain hết hạn / bài bị gỡ / **noindex** / **nofollow** / **canonical khác** / **cần đăng nhập mới xem** / **robots.txt chặn Google** / **Google bị báo 404** / **giấu link với Google** / **vòng lặp chuyển hướng** |
 | Không truyền giá trị (phụ) | Mã lỗi chính là chuyện khác nhưng dòng vẫn dính `noindex` / `nofollow` / `canonical khác` — bắt qua cột `canh_bao_them` |
 
 Lưu ý cách đọc khoản **"Không truyền giá trị (phụ)"**: `TRANG_NOINDEX`,
@@ -434,8 +524,8 @@ Mỗi link mang **hai** nhãn độc lập, trả lời hai câu hỏi khác nha
 
 | Kết luận | Màu | Nghĩa | Phải làm gì |
 |----------|-----|-------|-------------|
-| Link còn | xanh lá | Tool đọc được trang, **nhìn thấy thẻ `<a>`**, link dofollow và trang index được — tức là link **truyền được giá trị** | Không cần mở tay. Xem `muc_do` để biết link tốt hay còn khiếm khuyết. Nhóm này gồm cả `TRO_SAI_TANG` và `SAI_URL_DICH` — link vẫn truyền sức mạnh về hệ thống mình, chỉ là vào sai chỗ |
-| Link mất | đỏ | Tool đọc được trang và chắc chắn link **không truyền được giá trị nào**: 404/410/domain hết hạn/bài bị gỡ, hoặc thẻ `<a>` vẫn còn nhưng **noindex / nofollow / canonical khác** | Không cần mở tay. Đòi bù hoặc thay nguồn mới |
+| Link còn | xanh lá | **Googlebot** đọc được trang, **nhìn thấy thẻ `<a>`**, link dofollow và trang index được — tức là link **truyền được giá trị** | Không cần mở tay. Xem `muc_do` để biết link tốt hay còn khiếm khuyết. Nhóm này gồm cả `TRO_SAI_TANG`, `SAI_URL_DICH` (vào sai chỗ), `CLOAKING_NGUOI_DUNG` (người dùng bị chuyển đi nhưng Google vẫn thấy link), `NHANH_TREN_DA_CHET` và `LINK_BI_AN` |
+| Link mất | đỏ | Tool đọc được trang và chắc chắn link **không truyền được giá trị nào**: 404/410/domain hết hạn/bài bị gỡ, thẻ `<a>` vẫn còn nhưng **noindex / nofollow / canonical khác**, hoặc **người xem thấy link mà Googlebot thì không** | Không cần mở tay. Đòi bù hoặc thay nguồn mới — xem cột `yeu_cau` |
 | Phải check tay | vàng | Tool **không đọc được** nội dung thật (chặn bot, captcha, tường đăng nhập, chưa render JS, timeout…) | **Chưa phải là link mất.** Xem sheet "Cần check tay" |
 
 Nhóm "Phải check tay" được chia tiếp theo cột `cach_xu_ly`:
@@ -479,6 +569,34 @@ một bậc** (lỗi ở tầng xương sống thì nghiêm trọng hơn), tier 
   chưa đọc được file (mất mạng, 403, 5xx) — tool **không** kết luận gì từ đó.
 - `rendered` — `http` hay `playwright`. Kết luận "mất link" từ dòng `http` trên
   một domain render JS là không đáng tin.
+- `nguoi_xem` / `googlebot` — hai góc nhìn đặt cạnh nhau, viết bằng cụm từ ngắn
+  (`thay link`, `bi bao 404`, `bi chuyen sang ...`, `khong ro - bi chan HTTP 403`).
+  Trong XLSX nằm ngay sau cột Kết luận; hai ô **tô đỏ đậm** là chỗ người xem và
+  Google thấy khác nhau. Xem mục "Googlebot là chuẩn".
+- `yeu_cau` — `Thay link moi` (phải đăng bài khác) / `Sua link` (bên cung cấp sửa
+  ngay trên bài cũ: đổi dofollow, đổi đích, mở công khai) / `Sua tang tren`.
+  Bảng ánh xạ ở `LOAI_YEU_CAU` trong [diagnose.py](src/diagnose.py).
+- `dich_tang_tren` — link tier 3/4 trỏ vào URL tầng trên: URL đó `con song` hay
+  `DA CHET (<mã>)`. Xem mục "Nhánh tầng trên đã chết".
+- `vi_tri_link` — `than bai` / `binh luan` / `ho so` / `sidebar` / `footer` /
+  `menu` / `khong ro`. Phần tử cha **gần nhất** quyết định. Chỉ để tham khảo,
+  không đổi kết luận.
+
+### Nhánh tầng trên đã chết
+
+Tool check từng link độc lập, nhưng giá trị chạy theo chuỗi tầng 3 → tầng 2 →
+money site. Link tầng 3 nguyên vẹn mà URL tầng 2 nó trỏ tới đã chết thì giá trị
+dừng lại ở đó. [nhanh.py](src/nhanh.py) nối các tầng lại sau khi check xong mỗi
+tier: tra kết luận của URL tầng trên trong chính đợt chạy này, thiếu thì lấy từ
+CSV mới nhất trong `results/`.
+
+Dòng bị đánh dấu mang mã `NHANH_TREN_DA_CHET`, vẫn là **Link còn** và **không**
+vào yêu cầu bù — không phải lỗi của bên đặt link tầng dưới. Console và sheet
+"Tổng hợp" liệt kê URL tầng trên đã chết kèm số link tầng dưới đang đổ vào nó:
+sửa URL nào trước thì cứu được nhiều link nhất.
+
+Vì `blcheck run` chạy theo `priority` (tier 2 → 1 → 3 → 4), tầng trên luôn có kết
+quả trước tầng dưới. Chạy riêng `-t 4` thì tool dùng CSV tier 3 lần gần nhất.
 
 ## Bảng mã lỗi
 
@@ -493,13 +611,16 @@ thì thêm vào đó.
 | `KET_NOI_TU_CHOI` | Connection refused/reset | Kiểm tra tay một lần rồi thay nguồn |
 | `HTTP_404` | 404 | Bài bị xoá. Đăng lại hoặc thay nguồn |
 | `HTTP_410` | 410 Gone | Xoá vĩnh viễn, không đăng lại URL cũ được |
-| `SOFT_404` | 200 nhưng title là trang lỗi | Coi như mất link |
+| `SOFT_404` | 200 nhưng title là trang lỗi, hoặc trang ngắn không có link mà nội dung ghi rõ "không tồn tại" / "page not found" | Coi như mất link |
 | `DOMAIN_RAO_BAN` | nội dung là trang parking/rao bán | Bỏ. Có thể độc hại |
 | `CHUYEN_VE_TRANG_CHU` | bài viết bị redirect về trang chủ | Dấu hiệu bài bị gỡ |
-| `TRANG_NOINDEX` | meta robots noindex, thẻ `<a>` vẫn còn | **Coi như mất link.** Google không đọc tới trang nên thẻ `<a>` không truyền được chút giá trị nào. Có tính vào khoản đòi bù |
-| `NOFOLLOW` | rel nofollow/ugc/sponsored | **Coi như mất link.** Thẻ `<a>` còn đó nhưng Google không truyền chút sức mạnh nào. Đòi đổi sang dofollow hoặc bù. Có tính vào khoản đòi bù |
+| `TRANG_NOINDEX` | `meta robots` / `meta googlebot` / header `X-Robots-Tag` có noindex, thẻ `<a>` vẫn còn | **Coi như mất link.** Google không đọc tới trang nên thẻ `<a>` không truyền được chút giá trị nào. Có tính vào khoản đòi bù |
+| `NOFOLLOW` | rel nofollow/ugc/sponsored, hoặc `nofollow` cấp trang trong meta robots / `X-Robots-Tag` | **Coi như mất link.** Thẻ `<a>` còn đó nhưng Google không truyền chút sức mạnh nào. Đòi đổi sang dofollow hoặc bù. Có tính vào khoản đòi bù |
 | `CANONICAL_KHAC` | canonical trỏ đi nơi khác | **Coi như mất link.** Google gộp trang vào bản canonical, giá trị chảy sang chỗ khác. Có tính vào khoản đòi bù |
 | `ROBOTS_CHAN_GOOGLE` | `robots.txt` của site có dòng `Disallow` khớp đường dẫn này | **Coi như mất link.** Trang mở bình thường với người, thẻ `<a>` còn nguyên, nhưng Googlebot bị cấm thu thập nên không truyền giá trị. Bằng chứng đòi bù rất mạnh: dán nguyên dòng `Disallow` trong `robots.txt` của chính họ. Có tính vào khoản đòi bù |
+| `VONG_LAP_CHUYEN_HUONG` | trang chuyển hướng vòng tròn, cả httpx lẫn Chromium đều không mở được | Coi như mất link. Có tính vào khoản đòi bù |
+| `GOOGLE_BI_BAO_404` | người xem thấy link, Googlebot nhận 404/410 hoặc trang báo lỗi | **Coi như mất link.** Trang giấu mình với riêng Google. Bằng chứng: Rich Results Test. Có tính vào khoản đòi bù |
+| `AN_LINK_VOI_GOOGLE` | người xem thấy link, trang gửi Googlebot không có thẻ `<a>` hoặc chuyển Googlebot đi chỗ khác | **Coi như mất link.** Có tính vào khoản đòi bù |
 | `CAN_DANG_NHAP_MOI_XEM` | đã render bằng Chromium mà trang vẫn đòi đăng nhập | **Coi như mất link.** Googlebot không có tài khoản nên không vào được — đăng nhập tay chỉ xác nhận bài còn, không làm link truyền được giá trị. Việc cần làm là đổi chế độ chia sẻ sang công khai. Có tính vào khoản đòi bù |
 
 ### Chưa kết luận được — đừng vội báo mất link
@@ -528,6 +649,9 @@ thì thêm vào đó.
 | `LINK_QUA_TRUNG_GIAN` | href đi qua rút gọn/redirect | Ưu tiên link trỏ thẳng |
 | `TRANG_NHIEU_LINK_RA` | vượt `thresholds.outbound_link_limit` | Đặc trưng link farm |
 | `ANCHOR_RONG` / `ANCHOR_LA_URL` | anchor rỗng hoặc là URL trần | Không gấp |
+| `CLOAKING_NGUOI_DUNG` | Googlebot thấy link, người dùng bị chuyển đi / thấy 404 / không thấy link | **Vẫn là Link còn**, mức GHI CHÚ. Không đòi bù. Site dùng cloaking có rủi ro bị phạt, không đầu tư thêm |
+| `NHANH_TREN_DA_CHET` | link còn nhưng URL tầng trên nó trỏ vào đã chết | Vẫn là Link còn, không đòi bù. Sửa URL tầng trên trước |
+| `LINK_BI_AN` | thẻ `<a>` nằm trong phần tử `display:none` / `visibility:hidden` / cỡ chữ 0 (style inline) | Vẫn là Link còn vì có thể nhầm với tab / accordion đóng sẵn. Mở trang xem rồi mới đòi sửa |
 
 ## Thứ tự ưu tiên xử lý
 
@@ -668,9 +792,15 @@ Tool trả lời "link có tồn tại và trỏ đúng không". Nó **không** 
 index trang chứa link hay chưa — cần Google Search Console API hoặc dịch vụ như
 Ahrefs / Majestic.
 
-Cần phân biệt hai câu hỏi gần giống nhau: **"Google có được phép vào không"** thì
-tool trả lời được — đọc `robots.txt`, ra mã `ROBOTS_CHAN_GOOGLE`. Còn **"Google
-đã thực sự index chưa"** thì không, vì được phép vào không có nghĩa là đã vào.
+Cần phân biệt ba câu hỏi gần giống nhau:
+- **"Google có được phép vào không"** — tool trả lời được: đọc `robots.txt`, ra
+  mã `ROBOTS_CHAN_GOOGLE`.
+- **"Site trả gì cho Googlebot"** — tool trả lời được ở mức User-Agent: tải lại
+  bằng UA Googlebot, ra `GOOGLE_BI_BAO_404` / `AN_LINK_VOI_GOOGLE`. Không giả
+  được IP của Google, nên site nào xác minh IP thì phải kiểm chứng bằng Rich
+  Results Test.
+- **"Google đã thực sự index chưa"** — tool không trả lời được, vì được phép vào
+  không có nghĩa là đã vào.
 Phần lớn giá trị nằm ở câu hỏi thứ nhất, nhưng đừng đọc nhầm cái này thành cái kia. Link tồn tại nhưng trang không được index thì gần như không
 truyền giá trị. Cột `indexable` chỉ đọc được thẻ `noindex` và `canonical` trên
 trang, không phải trạng thái index thật.

@@ -206,7 +206,7 @@ ingest:
   # Khoa la tu khoa trong ten tab, gia tri la ten cot o dong tieu de.
   # So khop khong phan biet hoa thuong va khong phan biet dau tieng Viet.
   sheet_columns:
-    "link page rank cao": ["link dat"]     # bo cot "Ten Mien"
+    "link page rank cao": ["link dat"] # bo cot "Ten Mien"
     # Tab "Social Bookmarks DA cao tang 3" co 2 cot URL nhung CA HAI deu la
     # backlink that, nen khong khai bao o day - de ingest quet ca hai cot.
 

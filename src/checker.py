@@ -16,6 +16,7 @@ Ket qua: results/<ngay>_<site>_tier<N>.csv  va  .xlsx (co to mau).
 import argparse
 import asyncio
 import csv
+import re
 import sys
 import time
 from collections import defaultdict, deque
@@ -53,8 +54,18 @@ class Result:
     indexable: str = ""
     rendered: str = ""        # http / playwright
     robots: str = ""          # cho phep / bi chan / khong ro - theo robots.txt
+    # Hai goc nhin dat canh nhau: nguoi mo trang bang trinh duyet thay gi, va
+    # Googlebot thay gi. Tool KET LUAN theo Googlebot - Google chi truyen gia
+    # tri qua nhung gi no nhin thay. Hai cot lech nhau la dau hieu cloaking.
+    nguoi_xem: str = ""
+    googlebot: str = ""
+    # URL tang tren ma link nay do vao con song khong. Link tang 3 con nguyen
+    # ma URL tang 2 no tro toi da chet thi gia tri dung lai o do.
+    dich_tang_tren: str = ""
+    vi_tri_link: str = ""     # than bai / binh luan / sidebar / footer / ho so...
     elapsed: str = ""
     ket_luan: str = ""        # SONG / MAT / CHECK_TAY
+    yeu_cau: str = ""         # Thay link moi / Sua link - chi dien khi can xu ly
     cach_xu_ly: str = ""      # chi dien khi ket_luan = CHECK_TAY
     huong_dan_check: str = ""
     diag_code: str = ""
@@ -68,9 +79,120 @@ class Result:
 
 
 # ------------------------------------------------------------------ phan tich
+# Chi thi robots co gia tri dang sau dau hai cham - KHONG phai ten bot.
+# "unavailable_after: 25 Jun 2026" la mot chi thi, con "bingbot: noindex" thi
+# "bingbot" la ten bot. Nham hai loai nay la bo sot noindex hoac bao noindex oan.
+CHI_THI_CO_GIA_TRI = ("unavailable_after", "max-snippet", "max-image-preview",
+                      "max-video-preview")
+
+
+def _chi_thi_header(values):
+    """Doc cac header X-Robots-Tag, chi giu chi thi co hieu luc voi Googlebot.
+
+    Mot header co the viet cho moi bot ("noindex, nofollow") hoac cho rieng
+    mot bot ("googlebot: noindex" / "bingbot: noindex"). Ten bot dung dau ap
+    dung cho moi chi thi phia sau trong cung header do.
+    """
+    out = set()
+    for value in values or []:
+        bot = None
+        for phan in str(value).split(","):
+            phan = phan.strip().lower()
+            if not phan:
+                continue
+            if ":" in phan:
+                truoc, sau = (x.strip() for x in phan.split(":", 1))
+                if truoc not in CHI_THI_CO_GIA_TRI:
+                    bot, phan = truoc, sau
+            if phan and (bot is None or "googlebot" in bot):
+                out.add(phan)
+    return out
+
+
+def _chi_thi_robots(soup, x_robots):
+    """Gom chi thi robots ma Googlebot phai tuan theo -> (tap chi thi, nguon).
+
+    Truoc day chi doc <meta name="robots">. Bo sot hai duong Google van doc:
+      <meta name="googlebot" content="noindex">  - viet rieng cho Google
+      header HTTP X-Robots-Tag: noindex           - khong nam trong HTML
+    Ca hai deu cho ra "Link con" sai.
+    """
+    chi_thi, nguon = set(), []
+    for m in soup.find_all("meta", attrs={"name": True}):
+        ten = (m.get("name") or "").strip().lower()
+        if ten not in ("robots", "googlebot"):
+            continue
+        cs = {x.strip().lower() for x in (m.get("content") or "").split(",")
+              if x.strip()}
+        if cs & {"noindex", "nofollow", "none"}:
+            nguon.append("meta %s" % ten)
+        chi_thi |= cs
+    tu_header = _chi_thi_header(x_robots)
+    if tu_header & {"noindex", "nofollow", "none"}:
+        nguon.append("X-Robots-Tag")
+    return chi_thi | tu_header, nguon
+
+
+# Kieu an phan tu viet thang tren the (inline). Class CSS dat trong file .css
+# thi HTML khong cho biet - day la gioi han cua cach doc nay.
+AN_STYLE = re.compile(
+    r"display\s*:\s*none|visibility\s*:\s*hidden|"
+    r"font-size\s*:\s*0+(?:\.0+)?(?:px|pt|em|rem|%)?\s*(?:;|!|$)|"
+    r"(?:text-indent|left|top)\s*:\s*-\d{3,}", re.I)
+
+
+def _bi_an(a):
+    """The <a> co nam trong phan tu bi an bang style inline / thuoc tinh hidden."""
+    for el in [a] + list(a.parents):
+        if getattr(el, "name", None) in (None, "[document]"):
+            break
+        if el.has_attr("hidden") or AN_STYLE.search(el.get("style") or ""):
+            return True
+    return False
+
+
+# Vi tri link: phan tu cha GAN NHAT quyet dinh. Di het len tan goc roi de ket
+# qua ghi de nhau thi link trong khung binh luan nam trong <article> bi bao la
+# "than bai". Tu khoa so theo tung manh cua id/class, khong so chuoi con -
+# "domain" khong duoc khop "main", "canvas" khong duoc khop "nav".
+VI_TRI_THE = {"footer": "footer", "nav": "menu", "aside": "sidebar",
+              "header": "dau trang", "article": "than bai", "main": "than bai"}
+VI_TRI_TU = (
+    ("binh luan", ("comment", "comments", "reply", "respond", "disqus")),
+    ("ho so", ("profile", "author", "bio", "member", "user", "vcard")),
+    ("footer", ("footer",)),
+    ("sidebar", ("sidebar",)),
+    ("menu", ("menu", "nav", "navbar", "navigation", "breadcrumb")),
+    ("than bai", ("article", "content", "post", "entry", "main", "story")),
+)
+
+
+def _vi_tri(a):
+    # "widget" co o ca sidebar lan footer, nen chi la goi y yeu: di tiep len
+    # tren, gap footer/aside thi theo do, het cay moi coi la sidebar.
+    du_phong = None
+    for el in a.parents:
+        ten = getattr(el, "name", None)
+        if ten in (None, "[document]", "html", "body"):
+            break
+        manh = [m for m in re.split(r"[^a-z0-9]+", " ".join(
+            [el.get("id") or ""] + list(el.get("class") or [])).lower()) if m]
+        for nhan, tus in VI_TRI_TU:
+            if any(m == t or m.startswith(t) for m in manh for t in tus):
+                return nhan
+        if du_phong is None and any(m.startswith("widget") for m in manh):
+            du_phong = "sidebar"
+        if ten in VI_TRI_THE:
+            return VI_TRI_THE[ten]
+    return du_phong or "khong ro"
+
+
 def analyse(html, final_url, res, target_norms, target_domains,
-            declared_label=""):
-    """Doc HTML, dien vao res, tra ve dict tin hieu tho cho module chan doan."""
+            declared_label="", x_robots=None):
+    """Doc HTML, dien vao res, tra ve dict tin hieu tho cho module chan doan.
+
+    x_robots: danh sach gia tri header X-Robots-Tag cua response (neu co).
+    """
     soup = BeautifulSoup(html, "lxml")
     page = {}
 
@@ -80,59 +202,88 @@ def analyse(html, final_url, res, target_norms, target_domains,
     page["text_len"] = len(text)
     page["snippet"] = text[:1500]
 
-    robots = soup.find("meta", attrs={"name": lambda v: v and v.lower() == "robots"})
-    noindex = bool(robots and "noindex" in (robots.get("content") or "").lower())
+    chi_thi, nguon_robots = _chi_thi_robots(soup, x_robots)
+    noindex = bool(chi_thi & {"noindex", "none"})
+    # nofollow cap trang: moi link tren trang deu nofollow du the <a> khong co rel.
+    nofollow_trang = bool(chi_thi & {"nofollow", "none"})
     canon = soup.find("link", rel=lambda v: v and "canonical" in v)
     canon_ok = True
     if canon and canon.get("href"):
         canon_ok = U.normalize(urljoin(final_url, canon["href"])) == U.normalize(final_url)
     res.indexable = "no" if (noindex or not canon_ok) else "yes"
     if noindex:
-        res.note = "noindex"
+        res.note = ("noindex (%s)" % ", ".join(nguon_robots)) if nguon_robots else "noindex"
     elif not canon_ok:
         res.note = "canonical khac"
 
+    # <base href> doi goc cua moi href tuong doi tren trang.
+    base = soup.find("base", href=True)
+    goc = urljoin(final_url, base["href"]) if base else final_url
+
     src_host = U.domain_of(final_url)
     outbound = 0
-    fallback = None
-    hit = None
+    ung_vien = []
 
-    for a in soup.find_all("a", href=True):
+    for thu_tu, a in enumerate(soup.find_all("a", href=True)):
         raw_href = a["href"]
-        href = urljoin(final_url, raw_href)
+        href = urljoin(goc, raw_href)
         if U.domain_of(href) not in ("", src_host):
             outbound += 1
         hn = U.normalize(href)
-        rel = " ".join(a.get("rel") or []).lower() or "dofollow"
-        anchor = " ".join(a.get_text(" ", strip=True).split())[:150]
-
-        if hn in target_norms and hit is None:
-            hit = (href, anchor, rel, raw_href, target_norms[hn])
-        elif fallback is None and U.domain_of(href) in target_domains:
-            fallback = (href, anchor, rel, raw_href, target_domains[U.domain_of(href)])
+        if hn in target_norms:
+            hang, label = 0, target_norms[hn]
+        elif U.domain_of(href) in target_domains:
+            hang, label = 1, target_domains[U.domain_of(href)]
+        else:
+            continue
+        ung_vien.append((hang, thu_tu, a, href, raw_href, label))
 
     page["outbound"] = outbound
+    page["so_link_ve_dich"] = len(ung_vien)
+    if not ung_vien:
+        res.status = "NOT_FOUND"
+        return False, page
 
-    chosen, domain_only = hit, False
-    if chosen is None and fallback is not None:
-        chosen, domain_only = fallback, True
+    def _rel(a):
+        return " ".join(a.get("rel") or []).lower() or "dofollow"
 
-    if chosen:
-        res.status, res.points_to = "FOUND", chosen[0]
-        res.anchor_text = chosen[1] or "(anh / rong)"
-        res.rel = chosen[2]
-        res.khop_tang = chosen[4]
-        page["khop_tang"] = chosen[4]
-        page["tang_khai_bao"] = declared_label
-        page["sai_tang"] = bool(declared_label) and chosen[4] != declared_label
-        page["domain_only_match"] = domain_only
-        if domain_only:
-            res.note = (res.note + "; " if res.note else "") + "khop domain, sai URL dich"
-        page["via_redirect"] = D.via_redirect(chosen[3], chosen[0])
-        return True, page
+    # Trang co nhieu link ve dich thi chon link TOT NHAT, khong lay link dau tien:
+    # dung URL truoc sai URL, dofollow truoc nofollow, hien truoc an. Lay link dau
+    # tien thi mot link nofollow o sidebar dung truoc link dofollow trong bai se
+    # bien ca dong thanh NOFOLLOW - tinh vao yeu cau bu oan.
+    xep = sorted(ung_vien, key=lambda x: (
+        x[0], any(r in _rel(x[2]) for r in D.NOFOLLOW_REL), _bi_an(x[2]), x[1]))
+    hang, _tt, a, href, raw_href, label = xep[0]
 
-    res.status = "NOT_FOUND"
-    return False, page
+    anchor = " ".join(a.get_text(" ", strip=True).split())[:150]
+    if not anchor:
+        img = a.find("img")
+        alt = " ".join((img.get("alt") or "").split())[:140] if img else ""
+        # Link la anh: anchor that su chinh la thuoc tinh alt.
+        anchor = ("(anh) " + alt) if alt else ""
+    rel = _rel(a)
+    if nofollow_trang and not any(r in rel for r in D.NOFOLLOW_REL):
+        rel = "%s | nofollow toan trang (%s)" % (rel, ", ".join(nguon_robots))
+
+    res.status, res.points_to = "FOUND", href
+    res.anchor_text = anchor or "(anh / rong)"
+    res.rel = rel
+    res.khop_tang = label
+    page["khop_tang"] = label
+    page["tang_khai_bao"] = declared_label
+    page["sai_tang"] = bool(declared_label) and label != declared_label
+    # "Khop domain nhung sai URL dich" chi co nghia khi DA khai URL dich cu the
+    # cho ten mien do. Khai 'target_urls' rong = chi can tro dung domain la dat,
+    # trang nao cung duoc - luc do bao sai URL la bao oan toan bo danh sach.
+    sai_url = hang == 1 and any(U.domain_of(u) == U.domain_of(href)
+                                for u in target_norms)
+    page["domain_only_match"] = sai_url
+    page["link_bi_an"] = _bi_an(a)
+    page["vi_tri"] = _vi_tri(a)
+    if sai_url:
+        res.note = (res.note + "; " if res.note else "") + "khop domain, sai URL dich"
+    page["via_redirect"] = D.via_redirect(raw_href, href)
+    return True, page
 
 
 # Ma HTTP cho thay may chu tu choi *cach doc*, khong phai trang da chet.
@@ -228,7 +379,8 @@ async def check_one(client, row, sem, locks, targets, js_queue, cfg, use_js,
                         page["not_html"] = True
                     else:
                         ok, page2 = analyse(r.text, res.final_url, res,
-                                            tnorm, tdom, tlabel)
+                                            tnorm, tdom, tlabel,
+                                            x_robots=r.headers.get_list("x-robots-tag"))
                         page.update(page2)
                         if not ok and _nen_render(cfg, dom, use_js, page):
                             res._queued_js = True
@@ -243,6 +395,14 @@ async def check_one(client, row, sem, locks, targets, js_queue, cfg, use_js,
                     # dot chay. Link nay van con mot luot thu nua: khoi lenh
                     # ngay ben duoi day no sang Chromium o luot 2, va trinh
                     # duyet that manh hon httpx lap lai nhieu.
+                    break
+                except httpx.TooManyRedirects:
+                    # Trang chuyen huong vong tron. Khong phai loi mang nen thu lai
+                    # vo ich; van de Chromium thu mot luot (co site chi lap voi
+                    # client khong giu cookie), that bai nua moi ket luan.
+                    res.status, res.note = "PAGE_ERROR", "chuyen huong vong tron"
+                    page["error"] = "TooManyRedirects"
+                    page["vong_lap"] = True
                     break
                 except Exception as e:
                     res.status = "PAGE_ERROR"
@@ -263,7 +423,13 @@ async def check_one(client, row, sem, locks, targets, js_queue, cfg, use_js,
 
             # Het luot thu bang httpx ma van loi ket noi: Chromium van con co
             # hoi, vi nhieu may chu chi tu choi client khong phai trinh duyet.
+            # Chi ap cho loi KHONG co ma HTTP. Trang da tra ma HTTP thi nhanh
+            # http_code o tren da quyet roi; lot xuong day thi moi trang 404
+            # deu bi mo Chromium, va Chromium doc trang loi 404 xong lai xoa mat
+            # ma HTTP_404 - do that ngay 2026-09-06: 29 dong 404, 13 dong thanh
+            # TRANG_RONG (phai check tay), khong dong nao giu duoc HTTP_404.
             if (res.status == "PAGE_ERROR" and not getattr(res, "_queued_js", False)
+                    and (not res.http_code or page.get("vong_lap"))
                     and _nen_render(cfg, dom, use_js, page, loi_ket_noi=True)):
                 res._queued_js = True
                 js_queue.append((res, tnorm, tdom, tlabel, page))
@@ -275,10 +441,36 @@ async def check_one(client, row, sem, locks, targets, js_queue, cfg, use_js,
         if robots is not None and not _bo_qua_robots(res, page):
             res.robots = await robots.trang_thai(client, res.source_url)
 
+        # Hoi lai dung URL do voi tu cach Googlebot. Tool ket luan theo nhung gi
+        # Google nhin thay - xem D.phan_xu(). Dat SAU robots.txt: link da bi
+        # robots cam thi Google khong ghe vao, hoi them cung khong doi ket luan.
+        if cfg.googlebot.get("check", True):
+            ly_do = _bo_qua_googlebot(res, page)
+            if ly_do:
+                page["gb_bo_qua"] = ly_do
+            else:
+                delay = cfg.network["per_domain_delay"]
+                async with locks[dom]:
+                    gb = await _tai_nhu_googlebot(client, res.source_url,
+                                                  GOOGLEBOT_UA, tnorm, tdom, tlabel)
+                    await asyncio.sleep(delay)
+                    # Nguoi xem thay link ma Googlebot (ban dien thoai) thi khong:
+                    # hoi them ban may tinh de biet la giau voi Google hay chi la
+                    # giao dien dien thoai bo bot phan chua link. Ket luan van la
+                    # mat link - Google index theo ban dien thoai - nhung cau giai
+                    # thich khac han, va do la cau ben cung cap se hoi lai.
+                    if (res.status == "FOUND" and gb.get("html") and not gb.get("found")
+                            and 200 <= (gb.get("http") or 0) < 300):
+                        pc = await _tai_nhu_googlebot(client, res.source_url,
+                                                      GOOGLEBOT_UA_MAY_TINH,
+                                                      tnorm, tdom, tlabel)
+                        gb["desktop_found"] = bool(pc.get("found"))
+                        await asyncio.sleep(delay)
+                page["gb"] = gb
+
     res.elapsed = "%.1f" % (time.monotonic() - t0)
-    if getattr(res, "_queued_js", False):
-        res._page = page          # de recheck_js dung lai, finalize sau khi render
-    else:
+    res._page = page              # finalize can doc lai; recheck_js cung dung
+    if not getattr(res, "_queued_js", False):
         finalize(res, page, cfg, use_js)
     if on_progress:
         on_progress(res)
@@ -288,11 +480,95 @@ async def check_one(client, row, sem, locks, targets, js_queue, cfg, use_js,
     return res
 
 
+# Google index theo ban dien thoai (mobile-first), nen hoi bang UA Googlebot
+# dien thoai. Ban may tinh chi dung de giai thich khi hai ban lech nhau.
+GOOGLEBOT_UA = (
+    "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36 "
+    "(compatible; Googlebot/2.1; +http://www.google.com/bot.html)")
+GOOGLEBOT_UA_MAY_TINH = ("Mozilla/5.0 (compatible; Googlebot/2.1; "
+                         "+http://www.google.com/bot.html)")
+
+
+def _bo_qua_googlebot(res, page):
+    """Ly do KHONG hoi Googlebot cho dong nay; chuoi rong = can hoi."""
+    if getattr(res, "robots", "") == "bi chan":
+        return "robots.txt da cam Google"
+    if page.get("mang_chan"):
+        return "mang may chay tool chan ten mien nay"
+    # Khong co HTTP nao tra ve (DNS hong, timeout, tu choi ket noi): loi nam o
+    # tang mang, doi User-Agent khong doi duoc gi. Rieng vong lap chuyen huong
+    # thi co the chi lap voi trinh duyet nen van hoi.
+    if not res.http_code and not page.get("vong_lap"):
+        return "trang khong phan hoi"
+    return ""
+
+
+async def _tai_nhu_googlebot(client, url, ua, tn, td, tl):
+    """Tai URL voi User-Agent Googlebot, doc trang y het luot 1.
+
+    Tra ve dict: http, final_url, html, found, rel, indexable, note, points_to,
+    anchor_text, khop_tang, sig (tin hieu tho cua trang) - hoac {"loi": ...}.
+    KHONG dung toi doi tuong Result cua dong dang check.
+    """
+    try:
+        r = await client.get(url, follow_redirects=True, headers={"User-Agent": ua})
+    except httpx.TooManyRedirects:
+        return {"loi": "chuyen huong vong tron"}
+    except httpx.TimeoutException:
+        return {"loi": "timeout"}
+    except Exception as e:
+        return {"loi": type(e).__name__}
+    gb = {"http": r.status_code, "final_url": str(r.url)}
+    ctype = r.headers.get("content-type", "").lower()
+    gb["html"] = "html" in ctype or "xml" in ctype
+    sig = {}
+    if gb["html"] and 200 <= r.status_code < 300:
+        tam = Result(source_url=url)
+        ok, sig = analyse(r.text, gb["final_url"], tam, tn, td, tl,
+                          x_robots=r.headers.get_list("x-robots-tag"))
+        gb.update(found=ok, rel=tam.rel, indexable=tam.indexable, note=tam.note,
+                  points_to=tam.points_to, anchor_text=tam.anchor_text,
+                  khop_tang=tam.khop_tang)
+    elif gb["html"]:
+        sig = {"snippet": r.text[:1500]}
+    _redirect_flags(url, gb["final_url"], sig)
+    gb["sig"] = sig
+    return gb
+
+
+# Nhung truong mo ta "link nam dau, ra sao". Ket luan theo Googlebot se ghi de
+# chung bang nhung gi Googlebot thay, nen phai chup lai goc nhin nguoi xem o lan
+# finalize dau tien - finalize duoc goi lai (nhanh.py) ma khong lech ket qua.
+TRUONG_GOC_NHIN = ("status", "points_to", "anchor_text", "rel", "indexable",
+                   "khop_tang", "note")
+
+
 def finalize(res, page, cfg, use_js):
+    """Chan doan mot dong. Goi lai bao nhieu lan cung ra dung mot ket qua."""
+    res._page, res._use_js = page, use_js
+    goc = page.setdefault("_nguoi_xem", {k: getattr(res, k) for k in TRUONG_GOC_NHIN})
+    for k, v in goc.items():
+        setattr(res, k, v)
+
     forced = cfg.force_js_domain(U.domain_of(res.source_url)) and not use_js
-    code, sev, why, todo = D.diagnose(
-        res, page, cfg_js_forced=forced,
-        outbound_limit=int(cfg.raw.get("thresholds", {}).get("outbound_link_limit", 150)))
+    kq = D.phan_xu(res, page, cfg_js_forced=forced,
+                   outbound_limit=int(cfg.raw.get("thresholds", {})
+                                      .get("outbound_link_limit", 150)))
+    if kq["view"] == "google":
+        # Ket luan dua tren trang Googlebot nhan duoc -> cac cot mo ta link cung
+        # phai la cua trang do, khong thi dong ghi "Link con" ma cot Tro ve rong.
+        gb = page["gb"]
+        for k in ("points_to", "anchor_text", "rel", "indexable", "khop_tang"):
+            setattr(res, k, gb.get(k, ""))
+        res.status = "FOUND"
+        res.note = "; ".join(x for x in (
+            gb.get("note"),
+            "" if goc["status"] == "FOUND" else "link chi doc duoc qua Googlebot")
+            if x)
+
+    code = kq["code"]
+    sev, why, todo = D.CATALOG[code]
     sev = D.bump_by_tier(sev, res.tier,
                          {n: t.priority for n, t in cfg.tiers.items()}, code)
     res.ket_luan, res.cach_xu_ly, res.huong_dan_check = D.verdict_of(code)
@@ -302,7 +578,12 @@ def finalize(res, page, cfg, use_js):
     res.muc_do = D.SEV_LABEL[sev]
     res.chan_doan = why
     res.viec_can_lam = todo
-    res.canh_bao_them = ", ".join(D.secondary(res, page, code))
+    them = kq["them"] + D.secondary(res, kq["sig"], code)
+    res.canh_bao_them = ", ".join(dict.fromkeys(c for c in them if c != code))
+    res.nguoi_xem = kq["nguoi_xem"]
+    res.googlebot = kq["googlebot"] if cfg.googlebot.get("check", True) else ""
+    res.yeu_cau = D.yeu_cau(code, res.ket_luan)
+    res.vi_tri_link = (kq["sig"] or {}).get("vi_tri", "") if res.status == "FOUND" else ""
 
 
 TAI_NGUYEN_BO_QUA = ("image", "media", "font")
@@ -396,7 +677,7 @@ async def _tab_moi(ctx, page_obj):
 async def _doc_trang(page_obj, res, tn, td, tl, page, wait_after, timeout,
                      wait_until):
     """Mo mot URL bang Chromium va doc noi dung that. Ben goi boc trong tran."""
-    await page_obj.goto(res.source_url, wait_until=wait_until, timeout=timeout)
+    resp = await page_obj.goto(res.source_url, wait_until=wait_until, timeout=timeout)
     # Cho them mot nhip cho JS kip ve noi dung. Nhieu nen tang (penzu, notion,
     # mn.co) tra ve khung rong o thoi diem DOM san sang.
     if wait_after:
@@ -408,10 +689,19 @@ async def _doc_trang(page_obj, res, tn, td, tl, page, wait_after, timeout,
         await page_obj.wait_for_timeout(wait_after)
     res.rendered = "playwright"
     res.final_url = str(page_obj.url)
+    if resp is not None and resp.status in (404, 410):
+        # Trinh duyet that cung nhan 404/410: trang chet that, giu nguyen ma
+        # HTTP thay vi doc trang bao loi roi ket luan "khong thay link".
+        res.status, res.http_code = "PAGE_ERROR", str(resp.status)
+        res.note = "HTTP %s" % resp.status
+        page.pop("error", None)
+        return
     page.pop("error", None)
     page.pop("bi_chan", None)
     _redirect_flags(res.source_url, res.final_url, page)
-    ok, page2 = analyse(await page_obj.content(), res.final_url, res, tn, td, tl)
+    xr = (resp.headers.get("x-robots-tag") or "") if resp is not None else ""
+    ok, page2 = analyse(await page_obj.content(), res.final_url, res, tn, td, tl,
+                        x_robots=[v for v in xr.split("\n") if v.strip()])
     page.update(page2)
     if not ok:
         res.status = "NOT_FOUND"
@@ -675,7 +965,9 @@ def summary(results, cfg):
     for t in sorted(stats, key=lambda x: int(x) if str(x).isdigit() else 99):
         s = stats[t]
         tot = sum(s.values())
-        out.append("Tier %s: %5d link | song %5d | mat link %5d | loi trang %5d"
+        # Dem theo cot status = trinh duyet co thay the <a> hay khong. KHONG phai
+        # ket luan: link nguoi xem thay van co the mat vi Google khong thay.
+        out.append("Tier %s: %5d link | thay the <a> %5d | khong thay %5d | loi trang %5d"
                    % (t, tot, s["FOUND"], s["NOT_FOUND"], s["PAGE_ERROR"]))
 
     # ------------------------------------------------- chot lai cho nguoi dung
@@ -758,6 +1050,8 @@ async def main():
     print("", file=sys.stderr)
 
     results = await run_check(cfg, rows, targets, use_js)
+    import nhanh
+    nhanh.danh_dau(results, cfg, nhanh.ban_do(cfg, {"dot nay": results}), finalize)
 
     today = date.today().isoformat()
     tier_label = args.tier if args.tier else "all"
