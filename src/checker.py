@@ -554,7 +554,8 @@ def finalize(res, page, cfg, use_js):
     forced = cfg.force_js_domain(U.domain_of(res.source_url)) and not use_js
     kq = D.phan_xu(res, page, cfg_js_forced=forced,
                    outbound_limit=int(cfg.raw.get("thresholds", {})
-                                      .get("outbound_link_limit", 150)))
+                                      .get("outbound_link_limit", 150)),
+                   loose=cfg.loose)
     if kq["view"] == "google":
         # Ket luan dua tren trang Googlebot nhan duoc -> cac cot mo ta link cung
         # phai la cua trang do, khong thi dong ghi "Link con" ma cot Tro ve rong.
@@ -576,9 +577,13 @@ def finalize(res, page, cfg, use_js):
     res.diag_code = code
     res.severity = str(sev)
     res.muc_do = D.SEV_LABEL[sev]
+    if cfg.loose and code == "OK":
+        # Cau goc noi "dofollow" - che do long khong xet nofollow nen khong
+        # khang dinh duoc dieu do.
+        why = "Link song, tro dung URL dich (che do loose: khong xet nofollow / noindex)."
     res.chan_doan = why
     res.viec_can_lam = todo
-    them = kq["them"] + D.secondary(res, kq["sig"], code)
+    them = kq["them"] + D.secondary(res, kq["sig"], code, cfg.loose)
     res.canh_bao_them = ", ".join(dict.fromkeys(c for c in them if c != code))
     res.nguoi_xem = kq["nguoi_xem"]
     res.googlebot = kq["googlebot"] if cfg.googlebot.get("check", True) else ""

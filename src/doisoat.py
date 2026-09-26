@@ -48,6 +48,25 @@ KHOAN_BU = [
      "Link song va dofollow, nhung roi vao tang khac voi tang ho khai giao"),
 ]
 
+# Che do 'mode: loose' khong xet noindex / nofollow / canonical / robots.txt /
+# Googlebot, nen cac ma do khong bao gio xuat hien - doi cau giai thich cho
+# khop. So lieu tu no da dung vi doc tu file ket qua check.
+_VI_SAO_LOOSE = {
+    "chet": "404 / 410 / domain het han / bai bi go / trang con song nhung "
+            "khong con link ve dich",
+    "khong_gia_tri": "Che do loose khong xet noindex / nofollow - khoan nay luon 0",
+    "sai_tang": "Link song nhung roi vao tang khac voi tang ho khai giao - link "
+                "song duy nhat van tinh vao de nghi bu",
+}
+
+
+def khoan_bu(cfg=None):
+    """KHOAN_BU voi cau giai thich dung theo che do check cua config."""
+    if not getattr(cfg, "loose", False):
+        return KHOAN_BU
+    return [(k, ten, _VI_SAO_LOOSE.get(k, vi_sao)) for k, ten, vi_sao in KHOAN_BU]
+
+
 # Ma cho biet link tro khong dung tang da khai. Link van song, van dofollow,
 # van truyen gia tri - nhung vao sai cho nen khong dung duoc theo so do.
 #
@@ -195,7 +214,7 @@ def cong(bang, khoa):
 
 
 # ---------------------------------------------------------------------- console
-def in_console(bang, file_kq, trung=(), out=sys.stderr):
+def in_console(bang, file_kq, trung=(), out=sys.stderr, cfg=None):
     # Ten tab lay tu Google Sheet co dau tieng Viet. Console Windows mac dinh
     # la cp1252 nen print thang se no UnicodeEncodeError -> ep sang errors=replace.
     try:
@@ -236,7 +255,7 @@ def in_console(bang, file_kq, trung=(), out=sys.stderr):
     p("")
     p("DE NGHI BU LAI")
     p("-" * w)
-    for khoa, nhan_khoa, vi_sao in KHOAN_BU:
+    for khoa, nhan_khoa, vi_sao in khoan_bu(cfg):
         n = cong(bang, khoa)
         if n:
             p("  %-32s %5d   %s" % (nhan_khoa, n, vi_sao))
@@ -390,7 +409,7 @@ def write_xlsx(bang, path, cfg, rows=None, file_kq=(), kq=None, trung=()):
     for c in range(1, 4):
         ws.cell(row=ws.max_row, column=c).fill = HDR_FILL
         ws.cell(row=ws.max_row, column=c).font = HDR_FONT
-    for khoa, ten_khoan, vi_sao in KHOAN_BU:
+    for khoa, ten_khoan, vi_sao in khoan_bu(cfg):
         ws.append([ten_khoan, cong(bang, khoa), vi_sao])
         for c in range(1, 4):
             ws.cell(row=ws.max_row, column=c).fill = BU_FILL
@@ -406,7 +425,9 @@ def write_xlsx(bang, path, cfg, rows=None, file_kq=(), kq=None, trung=()):
             ws.append(["TRONG CAC LINK CHECK RA KHONG DUNG DUOC"])
             ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
             for ten, vi_sao in (
-                (D.YC_THAY, "Bai chet, bi go, bi giau voi Google... phai dang bai khac"),
+                (D.YC_THAY, "Bai chet, bi go, khong con link... phai dang bai khac"
+                 if cfg.loose else
+                 "Bai chet, bi go, bi giau voi Google... phai dang bai khac"),
                 (D.YC_SUA, "Ben cung cap sua ngay tren bai cu: doi sang dofollow, "
                            "doi lai URL dich, mo che do cong khai"),
             ):
@@ -433,7 +454,7 @@ def write_xlsx(bang, path, cfg, rows=None, file_kq=(), kq=None, trung=()):
 
     # ------------------------------------------------- sheet 3: link chet
     if rows is not None and kq is not None:
-        _sheet_chet(wb, rows, kq)
+        _sheet_chet(wb, rows, kq, cfg.loose)
 
     # ------------------------------------------------- sheet 4: phai check tay
     if rows is not None and kq is not None:
@@ -543,7 +564,7 @@ def _sheet_trung(wb, trung):
     return ws
 
 
-def _sheet_chet(wb, rows, kq):
+def _sheet_chet(wb, rows, kq, loose=False):
     """Danh sach tung URL da chet - phan gui kem khi bao lai ben cung cap."""
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -558,11 +579,18 @@ def _sheet_chet(wb, rows, kq):
     ws = wb.create_sheet("Link chet - gui ho")
     ws.append(["DANH SACH LINK KHONG DUNG DUOC - GUI KEM KHI DE NGHI BU"])
     ws.cell(row=1, column=1).font = Font(bold=True, size=13)
-    ws.append(["Gom ba nhom: link DA CHET (do); link con nhung trang NOINDEX nen "
-               "khong truyen gia tri (vang); va link song nhung TRO SAI TANG so "
-               "voi tang ho khai giao (xanh). Cot 'Yeu cau' tach link phai dang "
-               "bai moi voi link chi can sua tren bai cu. Hai cot 'Nguoi xem thay' "
-               "/ 'Google thay' la bang chung khi ho noi 'mo ra van thay link'."])
+    if loose:
+        ws.append(["Che do check loose - gom hai nhom: link DA CHET (do): trang "
+                   "chet hoac vao duoc ma khong con link ve dich; va link song nhung "
+                   "TRO SAI TANG so voi tang ho khai giao (xanh). Khong xet noindex "
+                   "/ nofollow / robots.txt / Googlebot. Cot 'Yeu cau' tach link "
+                   "phai dang bai moi voi link chi can sua tren bai cu."])
+    else:
+        ws.append(["Gom ba nhom: link DA CHET (do); link con nhung trang NOINDEX nen "
+                   "khong truyen gia tri (vang); va link song nhung TRO SAI TANG so "
+                   "voi tang ho khai giao (xanh). Cot 'Yeu cau' tach link phai dang "
+                   "bai moi voi link chi can sua tren bai cu. Hai cot 'Nguoi xem thay' "
+                   "/ 'Google thay' la bang chung khi ho noi 'mo ra van thay link'."])
     ws.cell(row=2, column=1).font = Font(italic=True, color="7F7F7F")
     ws.append([])
 
@@ -726,7 +754,7 @@ def main():
     cfg = bl_config.load(args.config)
     thu_muc = args.results_dir or None
     bang, rows, unmatched, file_kq, trung = build(cfg, args.url, thu_muc)
-    in_console(bang, file_kq, trung)
+    in_console(bang, file_kq, trung, cfg=cfg)
 
     kq, _ = doc_ket_qua(cfg, thu_muc)
     out = args.output or str(Path(cfg.output.get("dir", "results"))

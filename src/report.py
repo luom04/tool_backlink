@@ -159,6 +159,8 @@ def write_xlsx(results, path, cfg=None):
     if cfg is not None:
         s.append(["Site", getattr(cfg, "site_name", "")])
         s.append(["Money site", getattr(cfg, "money_domain", "")])
+        if getattr(cfg, "loose", False):
+            s.append(["Che do check", "loose - chi can vao duoc trang va thay link ve dich"])
         s.append([])
 
     # ---- khoi CHOT LAI: 3 con so nguoi dung can nhat, dat len tren cung
@@ -382,12 +384,23 @@ def write_xlsx(results, path, cfg=None):
     for c in range(1, 4):
         g.cell(row=g.max_row, column=c).fill = HEADER_FILL
         g.cell(row=g.max_row, column=c).font = HEADER_FONT
+    loose = bool(getattr(cfg, "loose", False))
+    if loose:
+        y_song = ("Tool vao duoc trang va nhin thay the <a> tro ve dich. Chac chan "
+                  "con link. Khong can mo tay. Gom ca link tro sai tang, nofollow, "
+                  "noindex, robots.txt chan (che do 'mode: loose' bo qua cac thu do; "
+                  "xem cot rel / indexable neu can).")
+        y_mat = ("Tool vao duoc trang va chac chan khong con link: 404, 410, domain "
+                 "het han, bai bi go, trang khong con the <a> ve dich. Khong can mo tay.")
+    else:
+        y_song = ("Tool nhin thay the <a> va trang co the duoc index. Chac chan "
+                  "con link. Khong can mo tay. Gom ca link tro sai tang.")
+        y_mat = ("Tool doc duoc trang va chac chan link khong con gia tri: 404, "
+                 "410, bai bi go, hoac trang mang the noindex (Google khong "
+                 "doc toi nen the <a> vo nghia). Khong can mo tay.")
     for v, mean in (
-        (D.V_SONG,  "Tool nhin thay the <a> va trang co the duoc index. Chac chan "
-                    "con link. Khong can mo tay. Gom ca link tro sai tang."),
-        (D.V_MAT,   "Tool doc duoc trang va chac chan link khong con gia tri: 404, "
-                    "410, bai bi go, hoac trang mang the noindex (Google khong "
-                    "doc toi nen the <a> vo nghia). Khong can mo tay."),
+        (D.V_SONG,  y_song),
+        (D.V_MAT,   y_mat),
         (D.V_CHECK, "Tool chua doc duoc noi dung that. CHUA ket luan. Xem sheet "
                     "'Can check tay'."),
     ):
@@ -415,9 +428,10 @@ def write_xlsx(results, path, cfg=None):
             g.cell(row=g.max_row, column=c).fill = FILL[sev]
             g.cell(row=g.max_row, column=c).font = FONT[sev]
     g.append([])
-    g.append(["HAI GOC NHIN - vi sao mo link ra van thay ma tool bao mat?"])
+    g.append(["CHE DO LONG - chi can vao duoc trang va thay link ve dich" if loose
+              else "HAI GOC NHIN - vi sao mo link ra van thay ma tool bao mat?"])
     g.cell(row=g.max_row, column=1).font = Font(bold=True, size=12)
-    for ten, y in (
+    goc_nhin = (
         ("Nguyen tac", "Tool ket luan theo NHUNG GI GOOGLEBOT THAY, khong theo nhung "
                        "gi nguoi mo trang thay. Google chi truyen gia tri qua trang ma "
                        "no doc duoc."),
@@ -441,7 +455,18 @@ def write_xlsx(results, path, cfg=None):
         ("Vi tri link", "Link nam o dau tren trang: than bai / binh luan / ho so / "
                         "sidebar / footer / menu. Link o footer, sidebar gia tri thap "
                         "hon link trong than bai."),
-    ):
+    )
+    if loose:
+        # Khong hoi Googlebot, khong doc robots.txt -> bo cac dong noi ve hai
+        # goc nhin, giu nhung dong van dung.
+        goc_nhin = (("Nguyen tac", "Config dang dat 'mode: loose': vao duoc trang va "
+                                   "thay the <a> tro ve dich la Link con. Khong xet "
+                                   "nofollow / noindex / canonical / robots.txt / "
+                                   "Googlebot. Doi 'mode: strict' de check theo Google."),
+                    ) + tuple(x for x in goc_nhin
+                              if x[0] in ("Nguoi xem thay", "Yeu cau",
+                                          "Dich tang tren", "Vi tri link"))
+    for ten, y in goc_nhin:
         g.append([ten, "", y])
         g.cell(row=g.max_row, column=1).font = Font(bold=True)
         g.cell(row=g.max_row, column=3).alignment = Alignment(wrap_text=True, vertical="top")

@@ -539,7 +539,7 @@ def _do_doisoat(cfg, url="", thu_muc=None, output=None):
     console.print()
     console.print(tui.doisoat_table(bang))
     console.print()
-    console.print(tui.doisoat_panel(bang, trung))
+    console.print(tui.doisoat_panel(bang, trung, cfg))
 
     if trung:
         console.print()

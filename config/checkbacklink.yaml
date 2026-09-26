@@ -217,6 +217,17 @@ ingest:
   # In canh bao khi gap URL chi co ten mien, khong co duong dan.
   warn_homepage_urls: true
 
+# ---------------------------------------------------------------------
+# CHE DO CHECK - muc chat cua ket luan "Link con"
+#   loose  - vao duoc trang va thay the <a> tro ve dich la SONG. Khong xet
+#            nofollow / noindex / canonical / robots.txt / Googlebot (khoi
+#            robots va googlebot ben duoi bi bo qua). Tro sai tang / sai URL
+#            van la Link con, co ghi chu. Trang khong vao duoc -> check tay.
+#   strict - Googlebot la chuan: link phai truyen duoc gia tri SEO moi song.
+#            nofollow / noindex / robots.txt chan / Google bi bao 404 -> Link mat.
+# ---------------------------------------------------------------------
+mode: loose
+
 robots:
   # Doc robots.txt cua tung host de biet Googlebot co duoc phep vao URL do khong.
   # Day la cau hoi KHAC voi "tool co doc duoc trang khong": trang mo binh thuong,

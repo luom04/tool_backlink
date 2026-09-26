@@ -241,6 +241,17 @@ output:
   filename: "{date}_{site}_tier{tier}"
 
 # ---------------------------------------------------------------------
+# CHE DO CHECK - muc chat cua ket luan "Link con"
+#   loose  - vao duoc trang va thay the <a> tro ve dich la SONG. Khong xet
+#            nofollow / noindex / canonical / robots.txt / Googlebot (khoi
+#            robots va googlebot ben duoi bi bo qua). Tro sai tang / sai URL
+#            van la Link con, co ghi chu. Trang khong vao duoc -> check tay.
+#   strict - Googlebot la chuan: link phai truyen duoc gia tri SEO moi song.
+#            nofollow / noindex / robots.txt chan / Google bi bao 404 -> Link mat.
+# ---------------------------------------------------------------------
+mode: loose
+
+# ---------------------------------------------------------------------
 # Doc robots.txt de biet Googlebot co duoc phep vao tung URL khong.
 # Trang mo duoc ma bi robots.txt cam thi Google khong ghe vao -> backlink
 # khong truyen gia tri -> ma ROBOTS_CHAN_GOOGLE, tinh vao khoan doi bu.

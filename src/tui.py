@@ -110,6 +110,9 @@ def config_panel(cfg, source_desc, tiers_to_run, limit=None):
     t.add_row("Nguon du lieu", source_desc)
     t.add_row("File sach", str(cfg.master_csv))
     t.add_row("Tier se chay", ", ".join(str(x) for x in tiers_to_run) or "(khong)")
+    if getattr(cfg, "loose", False):
+        t.add_row("Che do", "[green]loose[/green] [dim]— vao duoc trang, thay link ve "
+                  "dich la song. Bo qua nofollow/noindex/robots/Googlebot[/dim]")
     t.add_row("Song song", "%s request  ·  nghi %ss/domain  ·  timeout %ss"
               % (cfg.network["concurrency"], cfg.network["per_domain_delay"],
                  cfg.network["timeout"]))
@@ -204,7 +207,7 @@ def doisoat_table(bang):
     return t
 
 
-def doisoat_panel(bang, trung=()):
+def doisoat_panel(bang, trung=(), cfg=None):
     """Khoi ket luan doi soat: de nghi bu bao nhieu link, vi sao."""
     import doisoat as DS
 
@@ -228,7 +231,7 @@ def doisoat_panel(bang, trung=()):
                   % sum(d["thua"] for d in trung))
     g.add_row("", "", "")
     g.add_row("[bold]DE NGHI BU LAI[/bold]", "", "")
-    for khoa, ten, vi_sao in DS.KHOAN_BU:
+    for khoa, ten, vi_sao in DS.khoan_bu(cfg):
         n = c(khoa)
         if n:
             g.add_row(ten, "[red]%d[/red]" % n, "[dim]%s[/dim]" % vi_sao)

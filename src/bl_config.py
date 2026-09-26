@@ -94,6 +94,14 @@ DEFAULTS = {
 }
 
 
+# Muc chat cua ket luan "Link con":
+#   loose  - vao duoc trang va thay the <a> tro ve dich la song. Bo qua
+#            noindex / nofollow / canonical / robots.txt / Googlebot.
+#   strict - Googlebot la chuan: link phai truyen duoc gia tri SEO moi tinh la
+#            song (xem phan_xu() trong diagnose.py).
+MODES = ("loose", "strict")
+
+
 class ConfigError(Exception):
     pass
 
@@ -196,6 +204,17 @@ class Config:
         self.robots = merged["robots"]
         self.googlebot = merged["googlebot"]
 
+        # Muc chat cua ket luan. Xem MODES o dau file.
+        self.mode = str(raw.get("mode") or "loose").strip().lower()
+        if self.mode not in MODES:
+            raise ConfigError("mode phai la %s, dang la '%s'"
+                              % (" | ".join(MODES), self.mode))
+        if self.loose:
+            # Che do long khong quan tam Google co duoc vao khong, nen khoi ton
+            # request doc robots.txt va tai lai bang UA Googlebot.
+            self.robots = dict(self.robots, check=False)
+            self.googlebot = dict(self.googlebot, check=False)
+
         tiers_raw = raw.get("tiers") or {}
         if not tiers_raw:
             raise ConfigError("thieu muc 'tiers'")
@@ -221,6 +240,10 @@ class Config:
                         f"khop. Them 'money' hoac mot tang tren vao targets.")
 
         self._validate_delay()
+
+    @property
+    def loose(self) -> bool:
+        return self.mode == "loose"
 
     def js_concurrency(self) -> int:
         """So tab Chromium chay song song o luot render.

@@ -417,11 +417,14 @@ def dem_ket_luan(results):
     return d
 
 
-def diagnose(res, page, cfg_js_forced=False, outbound_limit=150):
+def diagnose(res, page, cfg_js_forced=False, outbound_limit=150, loose=False):
     """Tra ve (ma_loi, muc_nghiem_trong, giai_thich, viec_can_lam).
 
-    res  : doi tuong Result da duoc checker dien
-    page : dict tin hieu tho tu trang (title, text_len, outbound, html_snippet...)
+    res   : doi tuong Result da duoc checker dien
+    page  : dict tin hieu tho tu trang (title, text_len, outbound, html_snippet...)
+    loose : che do long (config 'mode: loose') - vao duoc trang, thay the <a>
+            ve dich la song. noindex / nofollow / canonical / robots.txt khong
+            con lam link thanh "Link mat"; cot rel, indexable, note van ghi lai.
     """
     page = page or {}
     title = page.get("title", "") or ""
@@ -440,7 +443,7 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150):
     # lai cam luon Googlebot -> khong con gi phai check tay: Google cung khong
     # vao duoc, ket luan da chac. Nhung dong 404/410/DNS hong khong bi anh huong
     # vi checker bo qua han buoc doc robots.txt cho chung (cot robots de rong).
-    if getattr(res, "robots", "") == "bi chan":
+    if getattr(res, "robots", "") == "bi chan" and not loose:
         return _pack("ROBOTS_CHAN_GOOGLE", res)
 
     # ---------------------------------------------------------- trang loi
@@ -499,7 +502,9 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150):
             # khung dang nhap cho client la roi moi ve noi dung that bang JS.
             # Nhung da mo bang Chromium that ma van bi chan thi khong con nghi
             # ngo gi: khach vang lai khong xem duoc, Googlebot cung vay.
-            if res.rendered == "playwright":
+            # Che do long chi hoi "co vao duoc khong": khong vao duoc thi
+            # de nguoi check tay, khong ket luan mat link.
+            if res.rendered == "playwright" and not loose:
                 return _pack("CAN_DANG_NHAP_MOI_XEM", res)
             return _pack("TUONG_DANG_NHAP", res)
         if page.get("js_unavailable"):
@@ -516,12 +521,17 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150):
         return _pack("LINK_BI_GO", res)
 
     # ---------------------------------------------------------- link con song
-    if res.indexable == "no":
+    if res.indexable == "no" and not loose:
         key = "CANONICAL_KHAC" if "canonical" in (res.note or "").lower() else "TRANG_NOINDEX"
         return _pack(key, res)
     rel = (res.rel or "").lower()
-    if any(r in rel for r in NOFOLLOW_REL):
+    if any(r in rel for r in NOFOLLOW_REL) and not loose:
         return _pack("NOFOLLOW", res)
+    # Che do long: link song thi khong doi bu, TRU link tro sai tang. doisoat.py
+    # dem khoan "sai tang" theo ma loi CHINH, nen o day sai tang phai thang
+    # SAI_URL_DICH / LINK_QUA_TRUNG_GIAN - hai ma do van nam o canh_bao_them.
+    if loose and page.get("sai_tang"):
+        return _pack("TRO_SAI_TANG", res)
     if page.get("via_redirect"):
         return _pack("LINK_QUA_TRUNG_GIAN", res)
     if "khong khop URL" in (res.note or "") or page.get("domain_only_match"):
@@ -598,15 +608,17 @@ def cap_theo_ket_luan(sev, ket_luan):
 # ----------------------------------------------------------------- canh bao phu
 # Mot link co the vua nofollow vua tro sai URL. Ma loi chinh chi lay cai nang nhat,
 # nen liet ke phan con lai o cot rieng de khong bo sot khi kiem tra tay.
-def secondary(res, page, primary=""):
+def secondary(res, page, primary="", loose=False):
+    """Che do long bo qua nofollow / noindex / canonical: khong ghi vao day, vi
+    doisoat.py doc cot canh_bao_them de tinh khoan "khong truyen gia tri"."""
     page = page or {}
     if res.status != "FOUND":
         return []
     out = []
     rel = (res.rel or "").lower()
-    if any(r in rel for r in NOFOLLOW_REL):
+    if any(r in rel for r in NOFOLLOW_REL) and not loose:
         out.append("NOFOLLOW")
-    if res.indexable == "no":
+    if res.indexable == "no" and not loose:
         out.append("CANONICAL_KHAC" if "canonical" in (res.note or "").lower()
                    else "TRANG_NOINDEX")
     if page.get("domain_only_match") or "sai URL dich" in (res.note or ""):
@@ -790,7 +802,7 @@ def _ban_google(res, gb):
         khop_tang=gb.get("khop_tang", ""))
 
 
-def phan_xu(res, page, cfg_js_forced=False, outbound_limit=150):
+def phan_xu(res, page, cfg_js_forced=False, outbound_limit=150, loose=False):
     """Ket luan cuoi cung cho mot dong, lay Googlebot lam chuan.
 
     Tra ve dict:
@@ -801,8 +813,9 @@ def phan_xu(res, page, cfg_js_forced=False, outbound_limit=150):
         nguoi_xem  / googlebot   hai cum tu cho hai cot de doc
     """
     page = page or {}
-    key = diagnose(res, page, cfg_js_forced, outbound_limit)[0]
-    g = goc_nhin_google(page)
+    key = diagnose(res, page, cfg_js_forced, outbound_limit, loose)[0]
+    # Che do long khong lay Googlebot lam chuan, du page co san du lieu 'gb'.
+    g = None if loose else goc_nhin_google(page)
     out = {"code": key, "view": None, "sig": page, "them": [],
            "nguoi_xem": nhan_nguoi_xem(res, page, key),
            "googlebot": nhan_googlebot(res, page, g)}
@@ -817,7 +830,8 @@ def phan_xu(res, page, cfg_js_forced=False, outbound_limit=150):
         sig = dict(gb.get("sig") or {})
         if page.get("nhanh_tren_chet"):
             sig["nhanh_tren_chet"] = page["nhanh_tren_chet"]
-        key_google = diagnose(_ban_google(res, gb), sig, False, outbound_limit)[0]
+        key_google = diagnose(_ban_google(res, gb), sig, False, outbound_limit,
+                              loose)[0]
         out.update(view="google", sig=sig, code=key_google)
         if not nguoi_thay and key in MA_NGUOI_XEM_KHAC:
             if key_google == "OK":

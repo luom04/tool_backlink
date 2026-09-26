@@ -350,7 +350,9 @@ def _sheet_huong_dan(wb, cfg, file_kq, dem):
 
     y_nghia = [
         ("SONG", "Tool doc duoc trang va nhin thay the <a>. Link dung duoc."),
-        ("MAT", "Link khong con gia tri: 404, 410, bai bi go, domain het han, "
+        ("MAT", "Link khong con: 404, 410, bai bi go, domain het han, hoac "
+                "vao duoc trang ma khong con link ve dich." if cfg.loose else
+                "Link khong con gia tri: 404, 410, bai bi go, domain het han, "
                 "hoac trang mang the noindex."),
         ("CHECK_TAY", "Tool chua doc duoc noi dung that (chan bot, captcha, "
                       "tuong dang nhap, chua render JS). CHUA phai la link mat."),

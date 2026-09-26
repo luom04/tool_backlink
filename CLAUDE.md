@@ -128,7 +128,29 @@ rồi kết luận "không thấy link", 13 dòng rơi vào `TRANG_RONG` (phải
 Giờ nhánh đó chỉ áp cho lỗi không có mã HTTP, và nếu Chromium nhận 404/410 thì
 cũng giữ nguyên mã.
 
-### Googlebot là chuẩn
+### Chế độ check: `mode: loose` / `mode: strict`
+
+Dự án hiện tại đặt **`mode: loose`** (cũng là mặc định khi config không khai):
+
+- Vào được trang, thấy thẻ `<a>` trỏ về đích → **Link còn**. Không xét
+  nofollow / noindex / canonical / `robots.txt` / Googlebot — tool bỏ luôn hai
+  bước tải `robots.txt` và tải lại bằng UA Googlebot. Cột `rel`, `indexable`
+  vẫn ghi lại để tham khảo, nhưng không đổi kết luận và không vào đòi bù.
+- Trỏ sai tầng / sai URL đích → vẫn Link còn, mang mã `TRO_SAI_TANG` /
+  `SAI_URL_DICH`.
+- **Đền bù:** link sống không vào đề nghị bù, **trừ trỏ sai tầng**. Ở loose,
+  `TRO_SAI_TANG` được xét trước `SAI_URL_DICH` / `LINK_QUA_TRUNG_GIAN` để làm mã
+  chính, vì `doisoat.py` đếm khoản sai tầng theo mã chính. Hai mã kia vẫn ghi ở
+  `canh_bao_them`.
+- Vào được trang mà không còn link, hoặc 404/410/domain hết hạn → Link mất.
+- Không vào được (chặn bot, captcha, timeout, đòi đăng nhập kể cả sau khi
+  render) → Phải check tay.
+
+Đổi thành `mode: strict` để quay về luật "Googlebot là chuẩn" ở mục dưới.
+Toàn bộ mục đó chỉ áp cho `strict`. Nhánh loose nằm ở tham số `loose` của
+`diagnose()` / `secondary()` trong [diagnose.py](src/diagnose.py).
+
+### Googlebot là chuẩn (chỉ `mode: strict`)
 
 Tool trả lời "link có truyền giá trị SEO không", mà Google chỉ truyền giá trị
 qua những gì **Googlebot nhìn thấy**. Nên ngoài lượt đọc bằng User-Agent Chrome
