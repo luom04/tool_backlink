@@ -206,25 +206,6 @@ def _so_moi(ten, tier, bo_qua=""):
             "trung_voi": Counter(), "nhan": 0, "domain_rieng": 0}
 
 
-def tai_xlsx_goc(cfg, override_url: str = ""):
-    """Nguyen file Excel goc (bytes) - giu ca mau sac, o gop, cong thuc. Dung
-    de xuat file ghi chu giong het ban goc. Nguon khong phai Excel / Google
-    Sheet (CSV, Google Doc) thi tra ve None."""
-    src_type = cfg.source_type
-    url = override_url or cfg.source_url
-    if override_url or src_type in ("auto", "", None):
-        src_type = detect_source(url) if url else "local"
-    if src_type == "google_sheet":
-        return _tai_google_sheet(url)
-    if url and src_type == "xlsx":
-        return _fetch(url)
-    if not url:
-        p = Path(cfg.source_file or cfg.master_csv)
-        if p.suffix.lower() in (".xlsx", ".xlsm") and p.exists():
-            return p.read_bytes()
-    return None
-
-
 def trang_chu_thua(urls):
     """URL trong MOT dong -> tap URL la trang chu cua mot link khac cung dong.
 

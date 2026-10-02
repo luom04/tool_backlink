@@ -1,4 +1,5 @@
 venv/
 __pycache__/
 results/*.csv
+# results/*.xlsx
 !results/.gitkeep

@@ -124,6 +124,8 @@ def write_xlsx(results, path, cfg=None):
                                              int(r.stt) if str(r.stt).isdigit() else 0))
     for r in ordered:
         sev = _sev(r)
+        if D.mau_ket_luan(r.diag_code, _verdict(r)) != _verdict(r):
+            sev = D.SEV_CHET          # con link nhung doi bu: to do nhu link mat
         row = [getattr(r, key, "") for key, _, _ in COLUMNS]
         ws.append(row)
         rn = ws.max_row
@@ -143,7 +145,8 @@ def write_xlsx(results, path, cfg=None):
         v = _verdict(r)
         vc = ws.cell(row=rn, column=keys.index("ket_luan") + 1)
         vc.value = D.V_LABEL.get(v, v)
-        vc.fill, vc.font = V_FILL[v], V_FONT[v]
+        m = D.mau_ket_luan(r.diag_code, v)
+        vc.fill, vc.font = V_FILL[m], V_FONT[m]
 
         # Nguoi xem va Google thay khac nhau: to dam hai o de mat bat ngay.
         if _lech(r):

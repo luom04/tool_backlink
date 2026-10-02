@@ -512,10 +512,7 @@ File thứ ba sinh ra ở bước 5 của `blcheck run`, hoặc chạy riêng:
 ```
 
 Nó tải lại nguồn gốc, **không gộp tab, không lọc dòng nào**, chỉ thêm 3 cột vào
-sau cột cuối cùng của mỗi tab. Nguồn là Google Sheet / Excel thì tool **mở chính
-file gốc** rồi ghi thêm, nên giữ nguyên màu sắc, font, ô gộp, công thức, độ rộng
-cột, định dạng số. Đo trên dự án quangcaominhloi: 22.354 ô gốc, 0 ô khác ngoài 3
-cột chú thích. Nguồn CSV / Google Doc thì chỉ chép giá trị:
+sau cột cuối cùng của mỗi tab (chép giá trị, không giữ màu / ô gộp của file gốc):
 
 | Cột thêm | Nội dung |
 |----------|----------|
@@ -528,7 +525,7 @@ Chỉ phần chú thích được tô màu, dữ liệu gốc giữ nguyên:
 | Màu | Nghĩa |
 |-----|-------|
 | xanh lá | Link còn, dùng được |
-| đỏ | Link mất — gồm cả noindex, canonical mà bản canonical không có link (nofollow thì vẫn là Link còn) |
+| đỏ | Link mất — gồm cả noindex, canonical mà bản canonical không có link (nofollow thì vẫn là Link còn). Cả **link còn nhưng trỏ sai tầng** (nhãn `Tro sai tang`) vì nó nằm trong đề nghị bù |
 | vàng | Chưa kết luận được, phải mở tay |
 | cam | Bị loại ngay từ bước làm sạch: trùng lặp, trỏ về money site, ô không phải URL, domain bị loại |
 | xám | Không tính (URL trang chủ của link cùng dòng — mã `TRANG_CHU_CUNG_DONG`, hoặc cột ngoài `sheet_columns`) hoặc chưa chạy check tới |
@@ -697,7 +694,7 @@ thì thêm vào đó.
 | Mã | Tín hiệu | Xử lý |
 |----|----------|-------|
 | `LINK_BI_GO` | trang sống, đọc được nội dung thật, không còn thẻ `<a>` nào về hệ thống mình | Admin gỡ link. Đăng lại |
-| `TRO_SAI_TANG` | link còn, trỏ đúng hệ thống mình nhưng **sai tầng** so với khai báo | Không phải link hỏng. Sửa khai báo `targets` cho khớp thực tế, hoặc đặt lại link |
+| `TRO_SAI_TANG` | link còn, trỏ đúng hệ thống mình nhưng **sai tầng** so với khai báo | Kết luận vẫn là Link còn nhưng **tính vào đề nghị bù**, nên mọi file xuất tô **đỏ** như link mất (`MA_SONG_DOI_BU` trong [diagnose.py](src/diagnose.py)). Sửa khai báo `targets` cho khớp thực tế, hoặc đặt lại link |
 | `SAI_URL_DICH` | đúng domain, sai trang | Sửa về đúng URL nếu còn quyền |
 | `LINK_QUA_TRUNG_GIAN` | href đi qua rút gọn/redirect | Ưu tiên link trỏ thẳng |
 | `TRANG_NHIEU_LINK_RA` | vượt `thresholds.outbound_link_limit` | Đặc trưng link farm |

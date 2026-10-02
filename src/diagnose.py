@@ -413,6 +413,18 @@ HUONG_DAN_CHECK = {
 }
 
 
+# Link CON (ket_luan = SONG) nhung van nam trong de nghi bu. File xuat to DO
+# nhu link mat, vi voi nguoi doi bu hai nhom nay cung mot viec: bat ben cung
+# cap lam lai. Ket luan van giu "Link con" - nhanh.py dua vao do de biet URL
+# tang tren con song hay khong.
+MA_SONG_DOI_BU = ("TRO_SAI_TANG",)
+
+
+def mau_ket_luan(code, ket_luan):
+    """Nhom mau cho mot dong: link song nhung doi bu thi to nhu link mat."""
+    return V_MAT if ket_luan == V_SONG and code in MA_SONG_DOI_BU else ket_luan
+
+
 def verdict_of(code):
     """code -> (ket_luan, cach_xu_ly, huong_dan). Ma la -> coi nhu phai check tay."""
     v, how = VERDICT.get(code, (V_CHECK, X_NGUOI))

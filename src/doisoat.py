@@ -577,7 +577,7 @@ def _sheet_chet(wb, rows, kq, loose=False):
     BU_FILL = PatternFill("solid", fgColor="FFC7CE")
 
     NOINDEX_FILL = PatternFill("solid", fgColor="FFE699")
-    SAI_TANG_FILL = PatternFill("solid", fgColor="D9E1F2")
+    SAI_TANG_FILL = BU_FILL    # sai tang cung doi bu -> do nhu link chet
 
     ws = wb.create_sheet("Link chet - gui ho")
     ws.append(["DANH SACH LINK KHONG DUNG DUOC - GUI KEM KHI DE NGHI BU"])
@@ -585,13 +585,13 @@ def _sheet_chet(wb, rows, kq, loose=False):
     if loose:
         ws.append(["Che do check loose - gom hai nhom: link DA CHET (do): trang "
                    "chet hoac vao duoc ma khong con link ve dich; va link song nhung "
-                   "TRO SAI TANG so voi tang ho khai giao (xanh). Khong xet noindex "
+                   "TRO SAI TANG so voi tang ho khai giao (cung to do). Khong xet noindex "
                    "/ nofollow / robots.txt / Googlebot. Cot 'Yeu cau' tach link "
                    "phai dang bai moi voi link chi can sua tren bai cu."])
     else:
         ws.append(["Gom ba nhom: link DA CHET (do); link con nhung trang NOINDEX nen "
                    "khong truyen gia tri (vang); va link song nhung TRO SAI TANG so "
-                   "voi tang ho khai giao (xanh). Cot 'Yeu cau' tach link phai dang "
+                   "voi tang ho khai giao (cung to do). Cot 'Yeu cau' tach link phai dang "
                    "bai moi voi link chi can sua tren bai cu. Hai cot 'Nguoi xem thay' "
                    "/ 'Google thay' la bang chung khi ho noi 'mo ra van thay link'."])
     ws.cell(row=2, column=1).font = Font(italic=True, color="7F7F7F")
