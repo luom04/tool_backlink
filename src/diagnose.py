@@ -219,11 +219,11 @@ CATALOG = {
     "OK": (SEV_TOT,
         "Link song, dofollow, tro dung URL dich.",
         "Khong can lam gi."),
-    "NOFOLLOW": (SEV_CHET,
+    "NOFOLLOW": (SEV_CANHBAO,
         "The <a> VAN CON nhung mang thuoc tinh nofollow/ugc/sponsored - Google "
-        "khong truyen chut suc manh SEO nao qua link nay.",
-        "Coi nhu MAT LINK: mua backlink la mua gia tri truyen ve, khong phai mua "
-        "mot the <a>. Yeu cau ben cung cap doi sang link dofollow hoac thay nguon."),
+        "khong truyen suc manh SEO, nhung link van dua traffic nguoi doc ve.",
+        "Van tinh la LINK CON vi con traffic, khong dua vao yeu cau bu. Neu ben "
+        "cung cap doi duoc sang dofollow thi tot hon."),
     "SAI_URL_DICH": (SEV_CANHBAO,
         "Link tro dung ten mien nhung sai trang cu the so voi ke hoach.",
         "Kiem tra tay va sua ve dung URL dich neu con quyen chinh sua."),
@@ -238,9 +238,22 @@ CATALOG = {
         "Coi nhu MAT LINK: mua backlink la mua gia tri truyen ve, khong phai mua "
         "mot the <a>. Thay bang nguon khac."),
     "CANONICAL_KHAC": (SEV_CHET,
-        "Trang co canonical tro sang URL khac - Google gop trang nay vao ban "
-        "canonical, gia tri link chay di noi khac chu khong ve he thong cua ta.",
-        "Coi nhu MAT LINK. Dat lai link tren chinh ban canonical, hoac thay nguon."),
+        "Trang co canonical tro sang URL khac, va tool da mo trang canonical do: "
+        "KHONG co link ve he thong cua ta. Google chi index ban canonical nen "
+        "trang chua link khong len Google - khong truyen gia tri, gan nhu khong "
+        "co traffic.",
+        "Coi nhu MAT LINK. Doi ben cung cap dat link tren chinh ban canonical "
+        "hoac thay nguon. Bang chung: URL canonical ghi o cot Ghi chu."),
+    "CANONICAL_CHUA_RO": (SEV_CANHBAO,
+        "Trang co canonical tro sang URL khac, nhung tool chua doc duoc trang "
+        "canonical (bi chan, loi mang, trang trong) nen chua biet ban canonical "
+        "co chua link khong.",
+        "Mo URL canonical (cot Ghi chu), Ctrl+F tim money site. Co link thi "
+        "link van con, khong co thi coi nhu mat."),
+    "CANONICAL_CO_LINK": (SEV_GHICHU,
+        "Trang co canonical tro sang URL khac, nhung ban canonical CUNG chua "
+        "link ve he thong cua ta - Google gop gia tri ve do, link van tinh.",
+        "Khong can lam gi."),
     "ANCHOR_RONG": (SEV_GHICHU,
         "Link ton tai nhung anchor text rong hoac chi la anh.",
         "Khong gap. Neu sua duoc thi dat anchor co tu khoa."),
@@ -318,6 +331,11 @@ VERDICT = {
     # Nhan ra bang style inline nen co the nham voi tab/accordion dong san.
     # Chua du chac de tinh la mat.
     "LINK_BI_AN":           (V_SONG,  ""),
+    # Google khong truyen suc manh qua nofollow, nhung link van mang traffic
+    # nguoi doc ve -> van tinh la con, khong doi bu (ca strict lan loose).
+    "NOFOLLOW":             (V_SONG,  ""),
+    # Ban canonical cung co link: Google gop gia tri ve do, link van tinh.
+    "CANONICAL_CO_LINK":    (V_SONG,  ""),
 
     # ---------------------------------------------- chac chan mat link
     "DOMAIN_KHONG_PHAN_GIAI": (V_MAT, ""),
@@ -327,16 +345,14 @@ VERDICT = {
     "DOMAIN_RAO_BAN":       (V_MAT,   ""),
     "CHUYEN_VE_TRANG_CHU":  (V_MAT,   ""),
     "LINK_BI_GO":           (V_MAT,   ""),
-    # Ba ma duoi day: the <a> VAN CON tren trang, nhung link khong truyen duoc
+    # Cac ma duoi day: the <a> VAN CON tren trang, nhung link khong truyen duoc
     # chut gia tri nao ve he thong cua ta. Ve mat SEO khong khac gi mat link,
     # va tool da doc duoc trang nen khong can ai mo tay xac minh -> xep vao MAT
     # va tinh vao khoan doi bu.
     #   TRANG_NOINDEX  Google khong bao gio doc toi trang chua link
-    #   NOFOLLOW       Google doc duoc nhung khong truyen suc manh
-    #   CANONICAL_KHAC gia tri chay sang ban canonical o noi khac
+    #   CANONICAL_KHAC ban canonical (trang Google index thay) KHONG co link
     #   CAN_DANG_NHAP_MOI_XEM  Googlebot khong co tai khoan nen khong vao duoc
     "TRANG_NOINDEX":        (V_MAT,   ""),
-    "NOFOLLOW":             (V_MAT,   ""),
     "CANONICAL_KHAC":       (V_MAT,   ""),
     "CAN_DANG_NHAP_MOI_XEM": (V_MAT,  ""),
     #   ROBOTS_CHAN_GOOGLE     robots.txt cam Googlebot vao dung duong dan nay
@@ -358,6 +374,7 @@ VERDICT = {
     "HTTP_401":             (V_CHECK, X_NGUOI),
     "BI_CHAN_CAPTCHA":      (V_CHECK, X_NGUOI),
     "TUONG_DANG_NHAP":      (V_CHECK, X_NGUOI),
+    "CANONICAL_CHUA_RO":    (V_CHECK, X_NGUOI),
     "SSL_LOI":              (V_CHECK, X_NGUOI),
     "KET_NOI_TU_CHOI":      (V_CHECK, X_NGUOI),
     # Loi nam o mang cua nguoi chay tool, khong phai o link. Doi mang roi chay
@@ -382,6 +399,7 @@ HUONG_DAN_CHECK = {
     "HTTP_401":            "Dang nhap bang tai khoan da dung de dang bai roi tim link",
     "BI_CHAN_CAPTCHA":     "Mo URL bang trinh duyet, qua captcha roi Ctrl+F tim link",
     "TUONG_DANG_NHAP":     "Dang nhap vao site roi kiem tra link con trong bai khong",
+    "CANONICAL_CHUA_RO":   "Mo URL canonical (cot Ghi chu), Ctrl+F tim ten mien money site",
     "SSL_LOI":             "Mo bang trinh duyet, bo qua canh bao chung chi de xem trang",
     "KET_NOI_TU_CHOI":     "Mo bang trinh duyet 1 lan. Van hong thi coi nhu mat link",
     "MANG_CUA_BAN_CHAN":   "Khong phai loi cua link. Chi can doc noi dung thi doi "
@@ -521,12 +539,18 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150, loose=False):
         return _pack("LINK_BI_GO", res)
 
     # ---------------------------------------------------------- link con song
-    if res.indexable == "no" and not loose:
-        key = "CANONICAL_KHAC" if "canonical" in (res.note or "").lower() else "TRANG_NOINDEX"
-        return _pack(key, res)
-    rel = (res.rel or "").lower()
-    if any(r in rel for r in NOFOLLOW_REL) and not loose:
-        return _pack("NOFOLLOW", res)
+    canonical_khac = res.indexable == "no" and "canonical" in (res.note or "").lower()
+    if res.indexable == "no" and not canonical_khac and not loose:
+        return _pack("TRANG_NOINDEX", res)
+    # Canonical khac: ket luan theo BAN CANONICAL - trang Google index thay cho
+    # trang nay. checker.py mo trang do va ghi ket qua vao page["canon_kq"].
+    # Ban canonical co link -> gia tri gop ve do, xet tiep nhu link binh thuong.
+    if canonical_khac and not loose:
+        ckq = page.get("canon_kq") or {}
+        if ckq.get("found") is False:
+            return _pack("CANONICAL_KHAC", res)
+        if not ckq.get("found"):
+            return _pack("CANONICAL_CHUA_RO", res)
     # Che do long: link song thi khong doi bu, TRU link tro sai tang. doisoat.py
     # dem khoan "sai tang" theo ma loi CHINH, nen o day sai tang phai thang
     # SAI_URL_DICH / LINK_QUA_TRUNG_GIAN - hai ma do van nam o canh_bao_them.
@@ -546,6 +570,14 @@ def diagnose(res, page, cfg_js_forced=False, outbound_limit=150, loose=False):
         return _pack("NHANH_TREN_DA_CHET", res)
     if page.get("link_bi_an"):
         return _pack("LINK_BI_AN", res)
+    # nofollow van la Link con (con traffic), nen dat SAU cac ma song khac:
+    # dung truoc thi hut mat TRO_SAI_TANG - khoan duy nhat cua link song con
+    # tinh vao yeu cau bu.
+    rel = (res.rel or "").lower()
+    if any(r in rel for r in NOFOLLOW_REL) and not loose:
+        return _pack("NOFOLLOW", res)
+    if canonical_khac and not loose:
+        return _pack("CANONICAL_CO_LINK", res)
     if page.get("outbound", 0) > outbound_limit:
         return _pack("TRANG_NHIEU_LINK_RA", res)
     a = (res.anchor_text or "").strip()
@@ -619,8 +651,12 @@ def secondary(res, page, primary="", loose=False):
     if any(r in rel for r in NOFOLLOW_REL) and not loose:
         out.append("NOFOLLOW")
     if res.indexable == "no" and not loose:
-        out.append("CANONICAL_KHAC" if "canonical" in (res.note or "").lower()
-                   else "TRANG_NOINDEX")
+        if "canonical" not in (res.note or "").lower():
+            out.append("TRANG_NOINDEX")
+        else:
+            found = (page.get("canon_kq") or {}).get("found")
+            out.append("CANONICAL_CO_LINK" if found else
+                       "CANONICAL_KHAC" if found is False else "CANONICAL_CHUA_RO")
     if page.get("domain_only_match") or "sai URL dich" in (res.note or ""):
         out.append("SAI_URL_DICH")
     if page.get("sai_tang"):
@@ -828,8 +864,9 @@ def phan_xu(res, page, cfg_js_forced=False, outbound_limit=150, loose=False):
 
     if g == G_THAY:
         sig = dict(gb.get("sig") or {})
-        if page.get("nhanh_tren_chet"):
-            sig["nhanh_tren_chet"] = page["nhanh_tren_chet"]
+        for k in ("nhanh_tren_chet", "canon_kq"):
+            if page.get(k):
+                sig[k] = page[k]
         key_google = diagnose(_ban_google(res, gb), sig, False, outbound_limit,
                               loose)[0]
         out.update(view="google", sig=sig, code=key_google)
@@ -863,7 +900,6 @@ def phan_xu(res, page, cfg_js_forced=False, outbound_limit=150, loose=False):
 # chinh bai do la xong - re hon va nhanh hon nhieu.
 YC_THAY, YC_SUA, YC_TANG_TREN = "Thay link moi", "Sua link", "Sua tang tren"
 LOAI_YEU_CAU = {
-    "NOFOLLOW":              YC_SUA,
     "CAN_DANG_NHAP_MOI_XEM": YC_SUA,
     "TRO_SAI_TANG":          YC_SUA,
     "SAI_URL_DICH":          YC_SUA,

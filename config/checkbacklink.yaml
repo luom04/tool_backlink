@@ -8,15 +8,15 @@
 # =====================================================================
 
 site:
-  name: huthamcautienphat
-  money_domain: huthamcautienphat.com
+  name: quangcaominhloi
+  money_domain: quangcaominhloi.vn
 
   # URL dich cu the. Link tro dung mot trong cac URL nay = khop chinh xac.
   # Tro dung domain nhung sai URL -> van tinh FOUND nhung bi gan ma SAI_URL_DICH.
   target_urls:
-    - https://huthamcautienphat.com/dich-vu-hut-ham-cau
-    - https://huthamcautienphat.com/hut-ham-cau-tai-tp-hcm-binh-duong
-    - https://huthamcautienphat.com/dich-vu-nao-vet-ho-gas-tai-binh-duong
+    - https://quangcaominhloi.vn/treo-bang-ron-co-phuon-toan-quoc
+    - https://quangcaominhloi.vn/chuoi-nha-phan-phoi-dai-ly
+    - https://quangcaominhloi.vn/roadshow-phuong-tien-giao-thong
 
   # Cac domain khac cung thuoc so huu (domain phu, rut gon rieng, ban .vn...).
   # Link tro ve day cung duoc tinh la tro ve money site.
@@ -40,8 +40,7 @@ source:
   #   Cac gia tri khac: google_sheet | google_doc | xlsx | csv | local
   #   De url rong -> tool doc thang file 'master_csv' co san trong may.
   type: auto
-  url: "https://docs.google.com/spreadsheets/d/1Mofu08iVDPfPMUl6ihX7hBxawwdA1i_sWrWqFh6Ne78/edit?gid=1202363611#gid=1202363611"
-
+  url: "https://docs.google.com/spreadsheets/d/1EgMuAZAMIc5RW8jlIdz-jQgK2uwy_Zl4/edit?gid=1273854646#gid=1273854646"
   # Chi dung khi lay tu file trong may thay vi tu Google (vd: data/goc.xlsx)
   file: ""
 
@@ -52,6 +51,12 @@ source:
 # Cau truc kim tu thap. Them/bot tier tuy y - tool khong gioi han 4 tang.
 #   targets: money   -> tang nay tro thang ve money site
 #   targets: tier:N  -> tang nay tro ve tap URL cua tier N
+#   targets: [A, B, C] -> A la dich KY VONG. B, C khai them de tool nhan ra link
+#                       tro nham cho va ghi TRO_SAI_TANG (Link con, tinh vao doi
+#                       bu khoan sai tang). Khong khai thi link tro nham bi coi
+#                       nhu khong co link -> Link mat.
+#                       Chi khai duoc tang TREN hoac CUNG tang, khong khai tang
+#                       duoi. Tier phu chi khop dung URL, khong khop ten mien.
 #   match:           -> tu khoa nhan dien ten tab trong Google Sheet (khong dau
 #                       hoa thuong, khop kieu "chua chuoi con")
 #   priority:        -> 1 = quan trong nhat. Anh huong toi muc do to mau:
@@ -61,12 +66,15 @@ source:
 tiers:
   1:
     label: "Tier 1 - tro thang money site"
-    targets: money
-    priority: 2
+    # Chuoi tro: tang 4 -> 3 -> 2 -> 1 -> money. Tier 1 la tang duy nhat tro
+    # thang money site, ca chuoi phia duoi do vao day.
+    targets: [money, "tier:1"]
+    priority: 1 # xuong song: loi o day keo sap ca chuoi 2-3-4
     match:
       - "backlink domain dr cao"
       - "url con"
       - "link page rank cao"
+      - "link bài viết trên blog"
       - "tier 1"
       - "tang 1"
     note: >
@@ -75,13 +83,13 @@ tiers:
       that tren dien dan Viet Nam.
 
   2:
-    label: "Tier 2 - web 2.0 tro thang money site"
-    targets: money
-    priority: 1 # nho nhat nhung quan trong nhat: ca tier 3 va 4 do vao day
+    label: "Tier 2 - tro ve tier 1"
+    targets: ["tier:1", money, "tier:2"]
+    priority: 2
     match:
       - "web 2.0"
-      - "link bai viet tren blog"
-      - "link bài viết trên blog"
+      # - "link bai viet tren blog"
+      # - "link bài viết trên blog"
       - "tier 2"
       - "tang 2"
     note: >
@@ -90,27 +98,23 @@ tiers:
 
   3:
     label: "Tier 3 - tro ve tier 2"
-    # Thuc te do duoc: nhom directory listing tro THANG money site, nhom blog
-    # Web2.0 tro sang directory listing (cung nam trong tier 3). Khai ca ba dich
-    # de tool doi chieu dung; cot "Khop tang" trong file ket qua se noi ro tung
-    # link roi vao dau. Dich dau tien la dich KY VONG - lech khoi no thi tool
-    # gan ma TRO_SAI_TANG (link van con, khong phai link hong).
-    targets: ["tier:2", money, "tier:3"]
+    # Dich dau tien la dich KY VONG - lech khoi no thi tool gan ma TRO_SAI_TANG
+    # (link van con). Cot "Khop tang" ghi ro link roi vao tang nao.
+    targets: ["tier:2", "tier:1", money, "tier:3"]
     priority: 4
     match:
-      - "submiss web 2.0"
-      - "social bookmarks da cao"
-      - "profile_submissions"
-      - "profile_blog comments"
+      - "Submiss 2.0 tầng 3"
+      - "Social Bookmarks DA cao tang 3 "
+      - "tang 3_ profile Blog Comments"
       - "tang 3"
       - "tier 3"
 
   4:
     label: "Tier 4 - tro ve tier 3"
-    targets: ["tier:3", "tier:2", money]
+    targets: ["tier:3", "tier:2", "tier:1", money, "tier:4"]
     priority: 4
     match:
-      - "tang 4_blog comment"
+      - "Tang 4_Blog comment"
       - "tang 4_bookmarks"
       - "tang 4"
       - "tier 4"
@@ -204,9 +208,12 @@ ingest:
   # Tab co nhieu cot URL thi khai bao ro lay cot nao, neu khong ingest se hot
   # ca cot phu (cot "Ten Mien" chi la trang chu, khong phai cho dat backlink).
   # Khoa la tu khoa trong ten tab, gia tri la ten cot o dong tieu de.
+  # Tab khong co dong tieu de thi khai theo chu cai cot: ["cot D"].
   # So khop khong phan biet hoa thuong va khong phan biet dau tieng Viet.
   sheet_columns:
-    "link page rank cao": ["link dat"] # bo cot "Ten Mien"
+    # De trong: tool tu bo URL trang chu khi cung dong co link that cung ten
+    # mien (vd tab "Link page rank cao": cot B trang chu, cot D link dat).
+    # Chi khai khi file trinh bay qua la. Vd: "ten tab": ["cot D"]
     # Tab "Social Bookmarks DA cao tang 3" co 2 cot URL nhung CA HAI deu la
     # backlink that, nen khong khai bao o day - de ingest quet ca hai cot.
 
@@ -226,7 +233,7 @@ ingest:
 #   strict - Googlebot la chuan: link phai truyen duoc gia tri SEO moi song.
 #            nofollow / noindex / robots.txt chan / Google bi bao 404 -> Link mat.
 # ---------------------------------------------------------------------
-mode: loose
+mode: strict
 
 robots:
   # Doc robots.txt cua tung host de biet Googlebot co duoc phep vao URL do khong.

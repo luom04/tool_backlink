@@ -3,7 +3,8 @@ Xuat lai file NGUON GOC kem chu thich - moi tab giu nguyen nhu ban dau.
 
 Khac han file trong results/: file kia la danh sach da lam sach, gop het 12 tab
 thanh mot bang. File nay giu dung hinh dang file goc ben cung cap gui - tung
-tab, tung dong, tung cot y nguyen - chi them 3 cot chu thich o cuoi moi dong:
+tab, tung dong, tung cot y nguyen (ca mau sac, o gop, cong thuc, do rong cot
+khi nguon la Google Sheet / Excel) - chi them 3 cot chu thich o cuoi moi dong:
 
     Ket luan | Ma loi | Chu thich
 
@@ -19,11 +20,12 @@ Chay:
     python src/cli.py ghichu -c config/checkbacklink.yaml
 """
 
+import io
 import sys
 from collections import Counter
 from pathlib import Path
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -166,19 +168,27 @@ def _urls_trong_o(cell):
 
 
 # ---------------------------------------------------------------------- build
+class DanhSachTab(list):
+    """list cac tab, kem nguyen file Excel goc (bytes) neu nguon la Excel."""
+    goc_xlsx = None
+
+
 def build(cfg, url="", thu_muc=None):
     """Doc nguon goc + ket qua check moi nhat -> du lieu de ghi ra xlsx.
 
     Tra ve (danh_sach_tab, file_ket_qua_da_dung, thong_ke).
     Moi tab: {"ten", "tier", "bo_qua", "rows": [(cells, ghi_chu_list)], ...}
     """
-    groups = ingest_mod.doc_nguon(cfg, url, giu_kieu=True)
+    goc = ingest_mod.tai_xlsx_goc(cfg, url)
+    groups = (ingest_mod.read_xlsx_bytes(goc, giu_kieu=True) if goc
+              else ingest_mod.doc_nguon(cfg, url, giu_kieu=True))
     kq, file_kq = doisoat.doc_ket_qua(cfg, thu_muc)
     drop_sheets = [s.lower() for s in cfg.ingest["drop_sheets"]]
 
     seen = {}
     dem = Counter()
-    tabs = []
+    tabs = DanhSachTab()
+    tabs.goc_xlsx = goc
 
     for sheet_name, sheet_rows in groups:
         bo_qua = ""
@@ -208,10 +218,22 @@ def build(cfg, url="", thu_muc=None):
         for i, row in enumerate(sheet_rows):
             ghis = []
             if not bo_qua:
+                # Cung luat voi ingest.build(): trang chu cua link cung dong
+                # khong phai backlink. Chi ap khi khong khai sheet_columns.
+                bo = (ingest_mod.trang_chu_thua(
+                    [u for c in row for u in _urls_trong_o(c)])
+                      if cot_tinh is None else set())
                 for j, cell in enumerate(row):
                     if cot_tinh is not None and i <= (dong_tieu_de or 0):
                         continue
                     for u_raw in _urls_trong_o(cell):
+                        if u_raw in bo:
+                            ghis.append(_Ghi(
+                                "KHONG_TINH", "TRANG_CHU_CUNG_DONG",
+                                "URL nay chi la trang chu cua link dat cung dong "
+                                "(cung ten mien) - thong tin 'dat tren site nao', "
+                                "khong phai backlink nen khong tinh."))
+                            continue
                         if cot_tinh is not None and j not in cot_tinh:
                             ghis.append(_Ghi(
                                 "KHONG_TINH", "COT_KHONG_TINH",
@@ -265,9 +287,70 @@ def _gop(ghis):
     return nhom, nhan, codes, text
 
 
+def _ghi_chu_thich(ws, rn, c0, ghis):
+    nhom, nhan, code, text = _gop(ghis)
+    fill, font, _ = NHOM[nhom]
+    for off, val in enumerate((nhan, code, text)):
+        c = ws.cell(row=rn, column=c0 + off, value=val)
+        c.fill = fill
+        c.font = font if off == 0 else Font(color=font.color.rgb)
+        c.alignment = Alignment(vertical="top", wrap_text=(off == 2))
+
+
+def _tieu_de_cot_them(ws, c0):
+    for off, (ten_cot, w) in enumerate(COT_THEM):
+        c = ws.cell(row=1, column=c0 + off, value=ten_cot)
+        c.fill, c.font = HDR_FILL, HDR_FONT
+        ws.column_dimensions[get_column_letter(c0 + off)].width = w
+
+
+def _write_giu_dinh_dang(tabs, path, cfg, file_kq, dem):
+    """Mo chinh file Excel goc, chi them 3 cot chu thich vao moi tab.
+
+    Moi thu cua ban goc giu nguyen: mau nen, font, o gop, cong thuc, do rong
+    cot, dong co dinh. Dong thu i cua tab["rows"] la dong i+1 trong Excel -
+    read_xlsx_bytes() doc che do read_only, che do do dem tu dong 1 va chen
+    dong trong cho dong thieu, nen hai ben khop nhau.
+    """
+    wb = load_workbook(io.BytesIO(tabs.goc_xlsx))
+    for tab in tabs:
+        if tab["ten"] not in wb.sheetnames:
+            continue
+        ws = wb[tab["ten"]]
+        n_cot_goc = max((_cot_cuoi_co_data(r[0]) for r in tab["rows"]), default=1) or 1
+        # O gop (vd tieu de A1:Z1) rong hon vung du lieu thi khong ghi de len
+        # duoc - dat cot chu thich ra sau no.
+        gop = max((m.max_col for m in ws.merged_cells.ranges), default=0)
+        c0 = max(n_cot_goc, gop) + 2
+        for i, (_cells, ghis) in enumerate(tab["rows"]):
+            if ghis:
+                _ghi_chu_thich(ws, i + 1, c0, ghis)
+        _tieu_de_cot_them(ws, c0)
+        if tab["bo_qua"]:
+            c = ws.cell(row=2, column=c0, value=tab["bo_qua"])
+            c.fill, c.font = XAM, F_XAM
+            c.alignment = Alignment(wrap_text=True, vertical="top")
+
+    huong_dan = _sheet_huong_dan(wb, cfg, file_kq, dem or Counter(),
+                                 ten=_ten_hop_le("Doc truoc",
+                                                 {n.lower() for n in wb.sheetnames}))
+    wb.move_sheet(huong_dan, offset=-wb.index(huong_dan))
+    wb.active = 0
+    for ws in wb.worksheets:
+        ws.sheet_view.tabSelected = ws is huong_dan
+    wb.save(path)
+    return path
+
+
 def write_xlsx(tabs, path, cfg, file_kq=(), dem=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if getattr(tabs, "goc_xlsx", None):
+        try:
+            return _write_giu_dinh_dang(tabs, path, cfg, file_kq, dem)
+        except Exception as e:  # noqa: BLE001 - file goc la, van phai ra file
+            print("CANH BAO: khong giu duoc dinh dang file goc (%s: %s) - xuat "
+                  "ban chi co gia tri." % (type(e).__name__, e), file=sys.stderr)
     wb = Workbook()
     wb.remove(wb.active)
 
@@ -285,22 +368,11 @@ def write_xlsx(tabs, path, cfg, file_kq=(), dem=None):
 
         for cells, ghis in tab["rows"]:
             ws.append(list(cells))
-            if not ghis:
-                continue
-            nhom, nhan, code, text = _gop(ghis)
-            fill, font, _ = NHOM[nhom]
-            rn = ws.max_row
-            for off, val in enumerate((nhan, code, text)):
-                c = ws.cell(row=rn, column=c0 + off, value=val)
-                c.fill = fill
-                c.font = font if off == 0 else Font(color=font.color.rgb)
-                c.alignment = Alignment(vertical="top", wrap_text=(off == 2))
+            if ghis:
+                _ghi_chu_thich(ws, ws.max_row, c0, ghis)
 
         # tieu de cho 3 cot them, dat o dong 1 de luon nhin thay
-        for off, (ten_cot, w) in enumerate(COT_THEM):
-            c = ws.cell(row=1, column=c0 + off, value=ten_cot)
-            c.fill, c.font = HDR_FILL, HDR_FONT
-            ws.column_dimensions[get_column_letter(c0 + off)].width = w
+        _tieu_de_cot_them(ws, c0)
 
         for j in range(1, n_cot_goc + 1):
             ws.column_dimensions[get_column_letter(j)].width = 42
@@ -326,16 +398,16 @@ def _ten_hop_le(ten, dung):
     return s
 
 
-def _sheet_huong_dan(wb, cfg, file_kq, dem):
-    ws = wb.create_sheet("Doc truoc")
+def _sheet_huong_dan(wb, cfg, file_kq, dem, ten="Doc truoc"):
+    ws = wb.create_sheet(ten)
     ws.column_dimensions["A"].width = 26
     ws.column_dimensions["B"].width = 12
     ws.column_dimensions["C"].width = 96
 
     ws.append(["FILE GOC CO CHU THICH"])
     ws.cell(row=1, column=1).font = Font(bold=True, size=14)
-    ws.append(["Giu nguyen tung tab, tung dong, tung cot cua file ben cung cap "
-               "gui. Ba cot mau o ben phai la phan tool them vao."])
+    ws.append(["Giu nguyen tung tab, tung dong, tung cot (ca mau sac, o gop) cua "
+               "file ben cung cap gui. Ba cot mau o ben phai la phan tool them vao."])
     ws.cell(row=2, column=1).font = Font(italic=True, color="7F7F7F")
     ws.append([])
     ws.append(["Money site", "", cfg.money_domain])
@@ -353,14 +425,15 @@ def _sheet_huong_dan(wb, cfg, file_kq, dem):
         ("MAT", "Link khong con: 404, 410, bai bi go, domain het han, hoac "
                 "vao duoc trang ma khong con link ve dich." if cfg.loose else
                 "Link khong con gia tri: 404, 410, bai bi go, domain het han, "
-                "hoac trang mang the noindex."),
+                "trang mang the noindex, hoac ban canonical khong co link."),
         ("CHECK_TAY", "Tool chua doc duoc noi dung that (chan bot, captcha, "
                       "tuong dang nhap, chua render JS). CHUA phai la link mat."),
         ("TRUNG", "URL da xuat hien o dong/tab truoc. Chi tinh duoc mot lan."),
         ("MONEY", "URL tro ve chinh money site - khong phai backlink."),
         ("URL_HONG", "O du lieu khong phai URL mo duoc."),
         ("DOMAIN_LOAI", "Domain nam trong ingest.drop_domains."),
-        ("KHONG_TINH", "Cot khong duoc khai trong ingest.sheet_columns."),
+        ("KHONG_TINH", "Khong phai backlink: URL trang chu cua link dat cung "
+                       "dong, hoac cot khong duoc khai trong ingest.sheet_columns."),
         ("CHUA_CHECK", "Chua chay check den URL nay."),
     ]
     for nhom, mo_ta in y_nghia:

@@ -215,23 +215,36 @@ def analyse(html, final_url, res, target_norms, target_domains,
         res.note = ("noindex (%s)" % ", ".join(nguon_robots)) if nguon_robots else "noindex"
     elif not canon_ok:
         res.note = "canonical khac"
+    if not canon_ok:
+        page["canonical"] = urljoin(final_url, canon["href"])
 
     # <base href> doi goc cua moi href tuong doi tren trang.
     base = soup.find("base", href=True)
     goc = urljoin(final_url, base["href"]) if base else final_url
 
     src_host = U.domain_of(final_url)
+    chinh_no = {U.normalize(final_url), U.normalize(res.source_url)}
     outbound = 0
     ung_vien = []
 
     for thu_tu, a in enumerate(soup.find_all("a", href=True)):
         raw_href = a["href"]
         href = urljoin(goc, raw_href)
-        if U.domain_of(href) not in ("", src_host):
+        noi_bo = U.domain_of(href) in ("", src_host)
+        if not noi_bo:
             outbound += 1
         hn = U.normalize(href)
+        # Link noi bo (Home, logo, menu, link toi chinh trang nay) khong phai
+        # backlink. Tang dang check co ten mien nam trong targets (khai 'tier:3'
+        # cho tier 3) thi nut Home tung khop theo ten mien -> trang da go link
+        # van ra TRO_SAI_TANG. Cung site chi tinh khi khop DUNG mot URL dich
+        # khac - hai bai cung tang tro qua lai van bat duoc.
+        if hn in chinh_no:
+            continue
         if hn in target_norms:
             hang, label = 0, target_norms[hn]
+        elif noi_bo:
+            continue
         elif U.domain_of(href) in target_domains:
             hang, label = 1, target_domains[U.domain_of(href)]
         else:
@@ -537,6 +550,83 @@ async def _tai_nhu_googlebot(client, url, ua, tn, td, tl):
     return gb
 
 
+async def _tai_canonical(client, url, tn, td, tl, uas):
+    """Mo trang canonical, hoi: ban canonical co chua link ve dich khong?
+
+    Thu lan luot tung User-Agent trong uas (Googlebot truoc, Chrome sau - site
+    chan Googlebot gia thi Chrome van doc duoc). Tra ve dict:
+        found = True   co link
+        found = False  doc duoc noi dung that, khong co link (hoac 404/410)
+        khong co found chua doc duoc - kem 'loi'
+    """
+    kq = {"url": url}
+    for ua in uas:
+        try:
+            r = await client.get(url, follow_redirects=True, headers={"User-Agent": ua})
+        except Exception as e:
+            kq["loi"] = type(e).__name__
+            continue
+        kq["http"] = r.status_code
+        if r.status_code in (404, 410):
+            kq.update(found=False, loi="")
+            return kq
+        ctype = r.headers.get("content-type", "").lower()
+        if not 200 <= r.status_code < 300 or ("html" not in ctype and "xml" not in ctype):
+            kq["loi"] = "HTTP %s" % r.status_code
+            continue
+        tam = Result(source_url=url)
+        ok, sig = analyse(r.text, str(r.url), tam, tn, td, tl)
+        if ok:
+            kq.update(found=True, loi="", points_to=tam.points_to, rel=tam.rel)
+            return kq
+        blob = ((sig.get("title") or "") + " " + (sig.get("snippet") or ""))[:6000]
+        if (sig.get("text_len", 0) < NGUONG_TRANG_RONG or D.CAPTCHA_PAT.search(blob)
+                or D.LOGIN_PAT.search(blob)):
+            # Khung cho JS / trang chan bot: "khong thay link" chua noi len gi.
+            kq["loi"] = "chua doc duoc noi dung"
+            continue
+        kq.update(found=False, loi="")
+        return kq
+    return kq
+
+
+async def _soat_canonical(results, cfg, targets, locks, use_js, client_kw,
+                          vadns=None):
+    """Dong nao ra CANONICAL_CHUA_RO thi mo trang canonical roi chan doan lai.
+
+    Chay SAU khi ca hai luot da xong, vi trang canonical lay tu goc nhin ma ket
+    luan dua vao (Googlebot neu co, khong thi nguoi xem). Moi URL canonical chi
+    tai mot lan, va van xep hang theo per_domain_delay.
+    """
+    can = [r for r in results if r.diag_code == "CANONICAL_CHUA_RO"]
+    if not can:
+        return 0
+    uas = ([GOOGLEBOT_UA] if cfg.googlebot.get("check", True) else [])         + [cfg.network["user_agent"]]
+    delay = float(cfg.network["per_domain_delay"])
+    cache = {}
+
+    async def mot(r, client):
+        page = getattr(r, "_page", {}) or {}
+        url = ((page.get("gb") or {}).get("sig") or {}).get("canonical")             or page.get("canonical")
+        if not url:
+            return
+        key = U.normalize(url)
+        if key not in cache:
+            tn, td, tl = targets[str(r.tier)]
+            if vadns is not None:
+                await vadns.dam_bao(client, U.domain_of(url))
+            async with locks[U.domain_of(url)]:
+                if key not in cache:
+                    cache[key] = await _tai_canonical(client, url, tn, td, tl, uas)
+                    await asyncio.sleep(delay)
+        page["canon_kq"] = cache[key]
+        finalize(r, page, cfg, use_js)
+
+    async with httpx.AsyncClient(**client_kw) as c:
+        await asyncio.gather(*[mot(r, c) for r in can])
+    return len(can)
+
+
 # Nhung truong mo ta "link nam dau, ra sao". Ket luan theo Googlebot se ghi de
 # chung bang nhung gi Googlebot thay, nen phai chup lai goc nhin nguoi xem o lan
 # finalize dau tien - finalize duoc goi lai (nhanh.py) ma khong lech ket qua.
@@ -583,6 +673,11 @@ def finalize(res, page, cfg, use_js):
         why = "Link song, tro dung URL dich (che do loose: khong xet nofollow / noindex)."
     res.chan_doan = why
     res.viec_can_lam = todo
+    ckq = (kq["sig"] or {}).get("canon_kq") or page.get("canon_kq")
+    if code.startswith("CANONICAL_") and ckq:
+        # URL canonical la bang chung: ben cung cap mo ra la thay ngay.
+        res.note = "; ".join(x for x in (res.note, "canonical: " + ckq["url"],
+                                           ckq.get("loi")) if x)
     them = kq["them"] + D.secondary(res, kq["sig"], code, cfg.loose)
     res.canh_bao_them = ", ".join(dict.fromkeys(c for c in them if c != code))
     res.nguoi_xem = kq["nguoi_xem"]
@@ -874,10 +969,10 @@ async def run_check(cfg, rows, targets, use_js, on_progress=None,
               if cfg.robots.get("check", True) else None)
     vadns = dnsfix.VaDNS(bool(cfg.network.get("dns_fallback", True)))
     limits = httpx.Limits(max_connections=int(cfg.network["concurrency"]) * 2)
-    async with httpx.AsyncClient(headers={"User-Agent": cfg.network["user_agent"]},
-                                 timeout=float(cfg.network["timeout"]),
-                                 verify=bool(cfg.network["verify_ssl"]),
-                                 limits=limits) as c:
+    client_kw = dict(headers={"User-Agent": cfg.network["user_agent"]},
+                     timeout=float(cfg.network["timeout"]),
+                     verify=bool(cfg.network["verify_ssl"]), limits=limits)
+    async with httpx.AsyncClient(**client_kw) as c:
         results = await asyncio.gather(*[
             check_one(c, r, sem, locks, targets, jsq, cfg, use_js, on_progress,
                       quiet, robots, vadns)
@@ -902,6 +997,14 @@ async def run_check(cfg, rows, targets, use_js, on_progress=None,
     for r in results:
         if not r.diag_code:
             finalize(r, getattr(r, "_page", {}), cfg, use_js)
+    # Canonical khac: mo ban canonical xem co link khong. Chay truoc go_patch
+    # vi trang canonical co the nam tren ten mien bi router chan.
+    so = await _soat_canonical(results, cfg, targets, locks, use_js, client_kw,
+                               vadns)
+    run_check.canonical_checked = so
+    if so and not quiet:
+        print("Da mo %d trang canonical de xem ban canonical co chua link khong."
+              % so, file=sys.stderr)
     # Tra socket ve nguyen trang: tien trinh nay con chay tiep cac buoc khac
     # (doi soat, ghi chu) va khong duoc mang theo anh xa DNS cua dot check.
     vadns.go_patch()
@@ -925,7 +1028,7 @@ def build_targets(rows, cfg):
     targets = {}
     for n, t in cfg.tiers.items():
         norms, doms = {}, {}
-        for kind, num in t.targets:
+        for i, (kind, num) in enumerate(t.targets):
             if kind == "money":
                 label = "money"
                 urls = cfg.target_urls
@@ -933,7 +1036,11 @@ def build_targets(rows, cfg):
             else:
                 label = "tier %s" % num
                 urls = by_tier.get(str(num), [])
-                extra_doms = {U.domain_of(u) for u in urls}
+                # Tier phu (khai them chi de bat TRO_SAI_TANG) chi khop DUNG URL.
+                # Tap ten mien cua no co ca nen tang dung chung (linkedin.com,
+                # medium.com...): khop theo ten mien thi nut chia se LinkedIn tren
+                # mot trang da go link cung thanh "Link con - tro sai tang".
+                extra_doms = {U.domain_of(u) for u in urls} if i == 0 else set()
             for u in urls:
                 norms.setdefault(U.normalize(u), label)
             for d in extra_doms:

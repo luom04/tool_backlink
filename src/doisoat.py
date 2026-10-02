@@ -40,10 +40,11 @@ KHOAN_BU = [
     ("url_hong",    "URL hong / khong hop le",
      "O du lieu khong phai URL mo duoc"),
     ("chet",        "Link da chet khi kiem tra",
-     "404 / 410 / domain het han / bai bi go / noindex / nofollow / canonical khac / "
+     "404 / 410 / domain het han / bai bi go / noindex / canonical khong co link / "
      "can dang nhap moi xem / Google bi bao 404 / link giau voi Google"),
     ("khong_gia_tri", "Link khong truyen duoc gia tri (phu)",
-     "Ket luan la Link con nhung van dinh noindex / nofollow / canonical khac"),
+     "Ket luan la Link con nhung van dinh noindex / canonical khong co link "
+     "(nofollow khong tinh - van co traffic)"),
     ("sai_tang",     "Link tro sai tang",
      "Link song va dofollow, nhung roi vao tang khac voi tang ho khai giao"),
 ]
@@ -79,12 +80,14 @@ def khoan_bu(cfg=None):
 MA_SAI_TANG = ("TRO_SAI_TANG",)
 
 # Ma loi tuy van con the <a> nhung link khong truyen duoc gia tri SEO nao.
-# Khi la ma loi CHINH, ca ba ma nay da duoc xep thang vao "Link mat" (xem VERDICT
-# trong diagnose.py) nen roi vao khoan "chet". Danh sach duoi day chi con bat
-# truong hop chung xuat hien o cot canh_bao_them - ma chinh la loi khac nhung
-# trang van noindex / link van nofollow. Hai duong khong chong nhau: khoan nay
-# chi cong them cho nhung dong co ket luan "Link con".
-MA_KHONG_GIA_TRI = ("TRANG_NOINDEX", "NOFOLLOW", "CANONICAL_KHAC")
+# NOFOLLOW co y KHONG nam o day: Google khong truyen suc manh nhung link van
+# dua traffic ve, nen van tinh la link da giao. CANONICAL_KHAC chi con nghia
+# "ban canonical KHONG co link" (co link thi la CANONICAL_CO_LINK). Khi la ma loi
+# CHINH, hai ma nay da duoc xep thang vao "Link mat" (xem VERDICT trong
+# diagnose.py) nen roi vao khoan "chet". Danh sach duoi day chi con bat truong
+# hop chung xuat hien o cot canh_bao_them. Hai duong khong chong nhau: khoan nay chi cong them cho nhung dong
+# co ket luan "Link con".
+MA_KHONG_GIA_TRI = ("TRANG_NOINDEX", "CANONICAL_KHAC")
 
 
 # ------------------------------------------------------------- doc ket qua check
@@ -154,7 +157,7 @@ def build(cfg, url="", thu_muc=None):
         v = _ket_luan(k)
         if v == D.V_SONG:
             theo_tab[r["sheet"]]["con"] += 1
-            # elif chu khong phai if: mot link vua nofollow vua sai tang van
+            # elif chu khong phai if: mot link vua noindex vua sai tang van
             # chi la MOT link thieu, dem hai lan la thoi phong yeu cau bu.
             # Uu tien khoan nang hon - khong truyen duoc chut gia tri nao.
             if _khong_gia_tri(k):
@@ -483,8 +486,8 @@ def _nhom_bu(k):
 def _yeu_cau(k, nhom=None):
     """Thay link moi hay chi can sua tren bai cu.
 
-    Nhom "Noindex" di theo ma phu: nofollow thi sua duoc, con noindex /
-    canonical khac la cau hinh ca trang, ben cung cap khong sua ho duoc -> thay.
+    Nhom "Noindex": noindex / canonical khac la cau hinh ca trang, ben cung
+    cap khong sua ho duoc -> thay. (nofollow khong con vao nhom nay.)
     File ket qua cu chua co cot yeu_cau thi suy tu ma loi.
     """
     nhom = nhom or _nhom_bu(k)

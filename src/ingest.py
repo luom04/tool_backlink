@@ -56,13 +56,17 @@ def detect_source(url: str) -> str:
 
 
 # ---------------------------------------------------------------- readers
-def read_google_sheet(url: str, giu_kieu: bool = False):
-    """Tra ve list (ten_tab, rows) cho moi tab. rows la list cac dong,
-    moi dong la list gia tri o - giu nguyen cot de con chon cot duoc."""
+def _tai_google_sheet(url: str) -> bytes:
     sid = SHEET_ID_RE.search(url).group(1)
     export = "https://docs.google.com/spreadsheets/d/%s/export?format=xlsx" % sid
     print("Tai Google Sheet %s ..." % sid, file=sys.stderr)
-    return read_xlsx_bytes(_fetch(export), giu_kieu)
+    return _fetch(export)
+
+
+def read_google_sheet(url: str, giu_kieu: bool = False):
+    """Tra ve list (ten_tab, rows) cho moi tab. rows la list cac dong,
+    moi dong la list gia tri o - giu nguyen cot de con chon cot duoc."""
+    return read_xlsx_bytes(_tai_google_sheet(url), giu_kieu)
 
 
 def read_xlsx_bytes(blob: bytes, giu_kieu: bool = False):
@@ -145,7 +149,20 @@ def tim_cot(rows, want_cols):
     """Do dong tieu de trong 10 dong dau -> (so_dong_tieu_de, chi_so_cot, ten_cot).
 
     Khong tim thay tieu de nao khop thi tra ve (None, [], []).
+
+    Tab khong co dong tieu de thi khai theo chu cai cot: "cot D", "cot AB".
+    Khi do lay tu dong dau tien (so_dong_tieu_de = -1) - o tieu de / STT khong
+    phai URL nen tu bi loc o buoc sau.
     """
+    chu = [re.fullmatch(r"cot\s*([a-z]{1,2})", w) for w in want_cols]
+    if want_cols and all(chu):
+        idx = []
+        for m in chu:
+            n = 0
+            for ch in m.group(1):
+                n = n * 26 + (ord(ch) - 96)
+            idx.append(n - 1)
+        return -1, idx, ["cot %s" % m.group(1).upper() for m in chu]
     for i, row in enumerate(rows[:10]):
         idx, names = [], []
         for j, v in enumerate(row):
@@ -187,6 +204,54 @@ def _so_moi(ten, tier, bo_qua=""):
             "tho": 0, "url_hong": 0, "money_site": 0, "domain_loai": 0,
             "trung": 0, "trung_trong_tab": 0, "trung_voi_tab_khac": 0,
             "trung_voi": Counter(), "nhan": 0, "domain_rieng": 0}
+
+
+def tai_xlsx_goc(cfg, override_url: str = ""):
+    """Nguyen file Excel goc (bytes) - giu ca mau sac, o gop, cong thuc. Dung
+    de xuat file ghi chu giong het ban goc. Nguon khong phai Excel / Google
+    Sheet (CSV, Google Doc) thi tra ve None."""
+    src_type = cfg.source_type
+    url = override_url or cfg.source_url
+    if override_url or src_type in ("auto", "", None):
+        src_type = detect_source(url) if url else "local"
+    if src_type == "google_sheet":
+        return _tai_google_sheet(url)
+    if url and src_type == "xlsx":
+        return _fetch(url)
+    if not url:
+        p = Path(cfg.source_file or cfg.master_csv)
+        if p.suffix.lower() in (".xlsx", ".xlsm") and p.exists():
+            return p.read_bytes()
+    return None
+
+
+def trang_chu_thua(urls):
+    """URL trong MOT dong -> tap URL la trang chu cua mot link khac cung dong.
+
+    File ben cung cap hay co dang: | Ten mien | DA | Link dat |, tuc cung dong
+    vua co trang chu (thong tin "dat tren site nao") vua co backlink that cung
+    ten mien. Trang chu do khong phai backlink. Trang chu dung MOT MINH thi
+    giu - co the backlink dat ngay trang chu (site ve tinh *.mystrikingly.com).
+
+    "Cung ten mien" = cung host, hoac link nam tren ten mien con cua trang chu
+    (loda-lang.org -> boinc.loda-lang.org). KHONG so theo ten mien goc: hai site
+    a.mystrikingly.com va b.mystrikingly.com la hai ve tinh khac nhau.
+    """
+    from urllib.parse import urlparse
+    info = []
+    for raw in urls:
+        u = U.clean_raw(raw) or ""
+        p = urlparse(u if "://" in u else "https://" + u)
+        info.append((raw, U.domain_of(u if "://" in u else "https://" + u),
+                     p.path in ("", "/") and not p.query))
+    bo = set()
+    for raw, host, la_trang_chu in info:
+        if not la_trang_chu or not host:
+            continue
+        if any(r2 != raw and not tc2 and (h2 == host or h2.endswith("." + host))
+               for r2, h2, tc2 in info):
+            bo.add(raw)
+    return bo
 
 
 def doc_nguon(cfg, override_url: str = "", giu_kieu: bool = False):
@@ -258,17 +323,28 @@ def build(cfg, override_url: str = "", verbose: bool = True):
                 print("  CANH BAO: tab '%s' co khai bao sheet_columns nhung khong "
                       "tim thay dong tieu de khop -> quet toan bo o." % sheet_name,
                       file=sys.stderr)
+        # Gom URL theo TUNG DONG de luat trang_chu_thua() so duoc cac o cung
+        # dong voi nhau. Tab da chon cot thi moi o la mot nhom rieng.
         if cells is None:
-            cells = [c for r in sheet_rows for c in r if str(c).strip()]
+            nhom_o = [[c for c in r if str(c).strip()] for r in sheet_rows]
+        else:
+            nhom_o = [[c] for c in cells]
 
         so = per_sheet.setdefault(sheet_name, _so_moi(sheet_name, tier))
         n_sheet = 0
-        for cell in cells:
-            found = U.extract_urls(cell)
-            if not found:
-                one = U.clean_raw(cell)
-                found = [one] if one else []
+        for o_cung_dong in nhom_o:
+            found = []
+            for cell in o_cung_dong:
+                f = U.extract_urls(cell)
+                if not f:
+                    one = U.clean_raw(cell)
+                    f = [one] if one else []
+                found += f
+            bo = trang_chu_thua(found) if cells is None else set()
             for raw in found:
+                if raw in bo:
+                    stats["trang_chu_cung_dong"] += 1
+                    continue
                 so["tho"] += 1
                 u = U.clean_raw(raw)
                 if not u or not U.is_valid(u, minlen):
@@ -345,7 +421,8 @@ def main():
     for t in sorted(cfg.tiers):
         n = sum(1 for r in rows if r["tier"] == t)
         print("  tier %d (%s): %d" % (t, cfg.tiers[t].label, n), file=sys.stderr)
-    for k in ("trung_lap", "url_hong", "tu_tro_ve_money_site", "domain_bi_loai"):
+    for k in ("trung_lap", "url_hong", "tu_tro_ve_money_site", "domain_bi_loai",
+              "trang_chu_cung_dong"):
         if stats[k]:
             print("  da loai [%s]: %d" % (k, stats[k]), file=sys.stderr)
     if cfg.ingest.get("warn_homepage_urls", True):

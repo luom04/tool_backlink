@@ -135,7 +135,8 @@ def _do_ingest(cfg, dry_run=False, url=""):
     line = []
     for k, lab in (("trung_lap", "trung lap"), ("url_hong", "URL hong"),
                    ("tu_tro_ve_money_site", "tu tro ve money site"),
-                   ("domain_bi_loai", "domain bi loai")):
+                   ("domain_bi_loai", "domain bi loai"),
+                   ("trang_chu_cung_dong", "trang chu cua link cung dong")):
         if stats[k]:
             line.append("%s: %d" % (lab, stats[k]))
     console.print("  [dim]Da loai — %s[/dim]" % (", ".join(line) if line else "khong co"))

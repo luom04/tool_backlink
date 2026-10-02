@@ -210,7 +210,23 @@ chậm gần gấp đôi (lượt render không đổi). Tắt bằng `googlebot
   dofollow > nofollow, hiện > ẩn), không lấy link đầu tiên — một link nofollow ở
   sidebar đứng trước link dofollow trong bài từng biến cả dòng thành `NOFOLLOW`.
 - Link là ảnh thì anchor lấy từ `alt`, không còn báo `ANCHOR_RONG` oan.
+- Canonical trỏ đi nơi khác thì tool **mở luôn trang canonical** (UA Googlebot
+  trước, Chrome sau), hỏi bản đó có link không: có → `CANONICAL_CO_LINK` (Link
+  còn), không → `CANONICAL_KHAC` (Link mất), không đọc được →
+  `CANONICAL_CHUA_RO` (check tay). Chạy sau cả hai lượt, mỗi URL canonical tải
+  một lần. Xem `_soat_canonical()` trong [checker.py](src/checker.py).
 - `<base href>` được tính khi ghép href tương đối.
+- Link nội bộ của chính trang nguồn (Home, logo, menu, link tới chính nó) không
+  được khớp theo tên miền. Trước đây tier 3 khai `tier:3` trong `targets` nên nút
+  Home của trang tier 3 khớp tên miền tier 3 — trang đã gỡ link vẫn ra
+  `TRO_SAI_TANG` (Link còn) thay vì `LINK_BI_GO`. Cùng site chỉ còn tính khi
+  khớp **đúng** một URL đích khác (hai bài cùng tầng trỏ qua lại).
+- Trỏ cùng tầng: khai chính tầng đó vào `targets` (sau đích chính) thì ra
+  `TRO_SAI_TANG`. Không khai được tầng **dưới** — config báo lỗi.
+- Tier khai **phụ** trong `targets` (không đứng đầu) chỉ khớp **đúng URL**,
+  không khớp tên miền. Tier 1 có URL trên `linkedin.com`, `medium.com`: khớp
+  tên miền thì nút chia sẻ LinkedIn trên trang đã gỡ link cũng thành
+  `TRO_SAI_TANG`. Xem `build_targets()` trong [checker.py](src/checker.py).
 
 ### Lượt render chạy song song
 
@@ -340,6 +356,17 @@ ingest:
 Ingest tìm dòng tiêu đề trong 10 dòng đầu của tab, lấy đúng cột đó. Không tìm
 thấy tiêu đề khớp thì in cảnh báo và quay lại quét toàn bộ ô.
 
+**Thường không cần khai gì.** Ingest tự bỏ URL trang chủ khi **cùng dòng** có
+link khác cùng tên miền (hoặc tên miền con) có đường dẫn — đúng kiểu
+`| Tên miền | DA | Link đặt |`. Trang chủ đứng một mình thì giữ (vệ tinh
+`*.mystrikingly.com/`). Hai URL khác tên miền cùng dòng thì giữ cả hai. Xem
+`trang_chu_thua()` trong [ingest.py](src/ingest.py). Đo trên dự án
+quangcaominhloi: bỏ đúng 50 URL cột B tab `Link Page rank cao`, 0 URL ở 10 tab
+còn lại — khớp hệt cách khai cột bằng tay.
+
+`sheet_columns` chỉ còn là dự phòng cho file trình bày lạ. Tab không có dòng
+tiêu đề thì khai theo chữ cái cột: `"ten tab": ["cot D"]`.
+
 Dấu hiệu nhận biết đang lấy nhầm cột: cuối phần chạy có cảnh báo
 **"URL chỉ có tên miền, không có đường dẫn"**. Không phải lúc nào cũng sai —
 9 URL `*.mystrikingly.com/` trong dự án này là trang chủ site vệ tinh thật, đặt
@@ -451,12 +478,12 @@ là "lặp lại" phụ thuộc vào thứ tự tab trong Google Sheet.
 | Link giao trùng | Cùng một URL đếm hai lần, chỉ tính được một |
 | Trỏ về money site | Đó là link của chính mình, không phải backlink |
 | URL hỏng | Ô dữ liệu không phải URL mở được |
-| Chết khi kiểm tra | 404 / 410 / domain hết hạn / bài bị gỡ / **noindex** / **nofollow** / **canonical khác** / **cần đăng nhập mới xem** / **robots.txt chặn Google** / **Google bị báo 404** / **giấu link với Google** / **vòng lặp chuyển hướng** |
-| Không truyền giá trị (phụ) | Mã lỗi chính là chuyện khác nhưng dòng vẫn dính `noindex` / `nofollow` / `canonical khác` — bắt qua cột `canh_bao_them` |
+| Chết khi kiểm tra | 404 / 410 / domain hết hạn / bài bị gỡ / **noindex** / **cần đăng nhập mới xem** / **robots.txt chặn Google** / **Google bị báo 404** / **giấu link với Google** / **vòng lặp chuyển hướng** |
+| Không truyền giá trị (phụ) | Mã lỗi chính là chuyện khác nhưng dòng vẫn dính `noindex` / canonical không có link — bắt qua cột `canh_bao_them`. **Nofollow không tính** — link vẫn đưa traffic về |
 
-Lưu ý cách đọc khoản **"Không truyền giá trị (phụ)"**: `TRANG_NOINDEX`,
-`NOFOLLOW`, `CANONICAL_KHAC` khi là **mã lỗi chính** đã được xếp thẳng vào nhóm
-`Link mất` ngay trong file kết quả check, nên chúng rơi vào khoản "Chết khi kiểm
+Lưu ý cách đọc khoản **"Không truyền giá trị (phụ)"**: `TRANG_NOINDEX`
+khi là **mã lỗi chính** đã được xếp thẳng vào nhóm
+`Link mất` ngay trong file kết quả check, nên nó rơi vào khoản "Chết khi kiểm
 tra". Khoản phụ chỉ còn cộng thêm cho những dòng kết luận là `Link còn` nhưng
 vẫn dính một trong ba thứ đó ở cột `canh_bao_them`. Hai đường không chồng nhau,
 không đếm trùng.
@@ -485,7 +512,10 @@ File thứ ba sinh ra ở bước 5 của `blcheck run`, hoặc chạy riêng:
 ```
 
 Nó tải lại nguồn gốc, **không gộp tab, không lọc dòng nào**, chỉ thêm 3 cột vào
-sau cột cuối cùng của mỗi tab:
+sau cột cuối cùng của mỗi tab. Nguồn là Google Sheet / Excel thì tool **mở chính
+file gốc** rồi ghi thêm, nên giữ nguyên màu sắc, font, ô gộp, công thức, độ rộng
+cột, định dạng số. Đo trên dự án quangcaominhloi: 22.354 ô gốc, 0 ô khác ngoài 3
+cột chú thích. Nguồn CSV / Google Doc thì chỉ chép giá trị:
 
 | Cột thêm | Nội dung |
 |----------|----------|
@@ -498,10 +528,10 @@ Chỉ phần chú thích được tô màu, dữ liệu gốc giữ nguyên:
 | Màu | Nghĩa |
 |-----|-------|
 | xanh lá | Link còn, dùng được |
-| đỏ | Link mất — gồm cả noindex, nofollow, canonical khác |
+| đỏ | Link mất — gồm cả noindex, canonical mà bản canonical không có link (nofollow thì vẫn là Link còn) |
 | vàng | Chưa kết luận được, phải mở tay |
 | cam | Bị loại ngay từ bước làm sạch: trùng lặp, trỏ về money site, ô không phải URL, domain bị loại |
-| xám | Không tính (cột ngoài `sheet_columns`) hoặc chưa chạy check tới |
+| xám | Không tính (URL trang chủ của link cùng dòng — mã `TRANG_CHU_CUNG_DONG`, hoặc cột ngoài `sheet_columns`) hoặc chưa chạy check tới |
 
 Điểm mạnh của file này là **giải thích được những dòng biến mất khỏi
 `backlinks_master.csv`**. Ví dụ tab `Tang 4_Bookmarks`: 418 dòng tô cam ghi rõ
@@ -546,8 +576,8 @@ Mỗi link mang **hai** nhãn độc lập, trả lời hai câu hỏi khác nha
 
 | Kết luận | Màu | Nghĩa | Phải làm gì |
 |----------|-----|-------|-------------|
-| Link còn | xanh lá | **Googlebot** đọc được trang, **nhìn thấy thẻ `<a>`**, link dofollow và trang index được — tức là link **truyền được giá trị** | Không cần mở tay. Xem `muc_do` để biết link tốt hay còn khiếm khuyết. Nhóm này gồm cả `TRO_SAI_TANG`, `SAI_URL_DICH` (vào sai chỗ), `CLOAKING_NGUOI_DUNG` (người dùng bị chuyển đi nhưng Google vẫn thấy link), `NHANH_TREN_DA_CHET` và `LINK_BI_AN` |
-| Link mất | đỏ | Tool đọc được trang và chắc chắn link **không truyền được giá trị nào**: 404/410/domain hết hạn/bài bị gỡ, thẻ `<a>` vẫn còn nhưng **noindex / nofollow / canonical khác**, hoặc **người xem thấy link mà Googlebot thì không** | Không cần mở tay. Đòi bù hoặc thay nguồn mới — xem cột `yeu_cau` |
+| Link còn | xanh lá | **Googlebot** đọc được trang, **nhìn thấy thẻ `<a>`**, link dofollow và trang index được — tức là link **truyền được giá trị** | Không cần mở tay. Xem `muc_do` để biết link tốt hay còn khiếm khuyết. Nhóm này gồm cả `NOFOLLOW` (Google không truyền sức mạnh nhưng link vẫn có traffic — không đòi bù), `CANONICAL_CO_LINK`, `TRO_SAI_TANG`, `SAI_URL_DICH` (vào sai chỗ), `CLOAKING_NGUOI_DUNG` (người dùng bị chuyển đi nhưng Google vẫn thấy link), `NHANH_TREN_DA_CHET` và `LINK_BI_AN` |
+| Link mất | đỏ | Tool đọc được trang và chắc chắn link **không truyền được giá trị nào**: 404/410/domain hết hạn/bài bị gỡ, thẻ `<a>` vẫn còn nhưng **noindex** / **bản canonical không có link**, hoặc **người xem thấy link mà Googlebot thì không** | Không cần mở tay. Đòi bù hoặc thay nguồn mới — xem cột `yeu_cau` |
 | Phải check tay | vàng | Tool **không đọc được** nội dung thật (chặn bot, captcha, tường đăng nhập, chưa render JS, timeout…) | **Chưa phải là link mất.** Xem sheet "Cần check tay" |
 
 Nhóm "Phải check tay" được chia tiếp theo cột `cach_xu_ly`:
@@ -637,8 +667,8 @@ thì thêm vào đó.
 | `DOMAIN_RAO_BAN` | nội dung là trang parking/rao bán | Bỏ. Có thể độc hại |
 | `CHUYEN_VE_TRANG_CHU` | bài viết bị redirect về trang chủ | Dấu hiệu bài bị gỡ |
 | `TRANG_NOINDEX` | `meta robots` / `meta googlebot` / header `X-Robots-Tag` có noindex, thẻ `<a>` vẫn còn | **Coi như mất link.** Google không đọc tới trang nên thẻ `<a>` không truyền được chút giá trị nào. Có tính vào khoản đòi bù |
-| `NOFOLLOW` | rel nofollow/ugc/sponsored, hoặc `nofollow` cấp trang trong meta robots / `X-Robots-Tag` | **Coi như mất link.** Thẻ `<a>` còn đó nhưng Google không truyền chút sức mạnh nào. Đòi đổi sang dofollow hoặc bù. Có tính vào khoản đòi bù |
-| `CANONICAL_KHAC` | canonical trỏ đi nơi khác | **Coi như mất link.** Google gộp trang vào bản canonical, giá trị chảy sang chỗ khác. Có tính vào khoản đòi bù |
+| `NOFOLLOW` | rel nofollow/ugc/sponsored, hoặc `nofollow` cấp trang trong meta robots / `X-Robots-Tag` | **Vẫn là Link còn**, mức CẢNH BÁO. Google không truyền sức mạnh nhưng link vẫn đưa traffic về. **Không** tính vào khoản đòi bù. Xét **sau** `TRO_SAI_TANG` / `SAI_URL_DICH` để không che khoản sai tầng |
+| `CANONICAL_KHAC` | canonical trỏ đi nơi khác, tool **đã mở trang canonical** và trang đó **không có link** (hoặc 404/410) | **Coi như mất link.** Google chỉ index bản canonical nên trang chứa link không lên Google — không giá trị, gần như không traffic. Có tính vào khoản đòi bù. URL canonical ghi ở cột `note` làm bằng chứng |
 | `ROBOTS_CHAN_GOOGLE` | `robots.txt` của site có dòng `Disallow` khớp đường dẫn này | **Coi như mất link.** Trang mở bình thường với người, thẻ `<a>` còn nguyên, nhưng Googlebot bị cấm thu thập nên không truyền giá trị. Bằng chứng đòi bù rất mạnh: dán nguyên dòng `Disallow` trong `robots.txt` của chính họ. Có tính vào khoản đòi bù |
 | `VONG_LAP_CHUYEN_HUONG` | trang chuyển hướng vòng tròn, cả httpx lẫn Chromium đều không mở được | Coi như mất link. Có tính vào khoản đòi bù |
 | `GOOGLE_BI_BAO_404` | người xem thấy link, Googlebot nhận 404/410 hoặc trang báo lỗi | **Coi như mất link.** Trang giấu mình với riêng Google. Bằng chứng: Rich Results Test. Có tính vào khoản đòi bù |
@@ -649,6 +679,7 @@ thì thêm vào đó.
 
 | Mã | Tín hiệu | Xử lý |
 |----|----------|-------|
+| `CANONICAL_CHUA_RO` | canonical trỏ đi nơi khác, nhưng tool không đọc được trang canonical (403, timeout, trang trống) | Mở URL canonical ở cột `note`, `Ctrl+F` tìm money site |
 | `HTTP_403_CHAN_BOT` | 403 | Thường là Cloudflare chặn bot. Bật `--js` hoặc mở tay |
 | `BI_CHAN_CAPTCHA` | nội dung có captcha / "Just a moment" | Kiểm tra tay |
 | `HTTP_429` | 429 | Ta bắn quá nhanh. Tăng `per_domain_delay` rồi chạy lại |
@@ -671,6 +702,7 @@ thì thêm vào đó.
 | `LINK_QUA_TRUNG_GIAN` | href đi qua rút gọn/redirect | Ưu tiên link trỏ thẳng |
 | `TRANG_NHIEU_LINK_RA` | vượt `thresholds.outbound_link_limit` | Đặc trưng link farm |
 | `ANCHOR_RONG` / `ANCHOR_LA_URL` | anchor rỗng hoặc là URL trần | Không gấp |
+| `CANONICAL_CO_LINK` | canonical trỏ đi nơi khác, nhưng **bản canonical cũng có link** về hệ thống mình | **Link còn**, mức GHI CHÚ. Google gộp giá trị về bản canonical, link vẫn tính. Không đòi bù |
 | `CLOAKING_NGUOI_DUNG` | Googlebot thấy link, người dùng bị chuyển đi / thấy 404 / không thấy link | **Vẫn là Link còn**, mức GHI CHÚ. Không đòi bù. Site dùng cloaking có rủi ro bị phạt, không đầu tư thêm |
 | `NHANH_TREN_DA_CHET` | link còn nhưng URL tầng trên nó trỏ vào đã chết | Vẫn là Link còn, không đòi bù. Sửa URL tầng trên trước |
 | `LINK_BI_AN` | thẻ `<a>` nằm trong phần tử `display:none` / `visibility:hidden` / cỡ chữ 0 (style inline) | Vẫn là Link còn vì có thể nhầm với tab / accordion đóng sẵn. Mở trang xem rồi mới đòi sửa |

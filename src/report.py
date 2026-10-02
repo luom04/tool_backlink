@@ -394,7 +394,8 @@ def write_xlsx(results, path, cfg=None):
                  "het han, bai bi go, trang khong con the <a> ve dich. Khong can mo tay.")
     else:
         y_song = ("Tool nhin thay the <a> va trang co the duoc index. Chac chan "
-                  "con link. Khong can mo tay. Gom ca link tro sai tang.")
+                  "con link. Khong can mo tay. Gom ca link tro sai tang va link "
+                  "nofollow (Google khong truyen suc manh nhung van co traffic).")
         y_mat = ("Tool doc duoc trang va chac chan link khong con gia tri: 404, "
                  "410, bai bi go, hoac trang mang the noindex (Google khong "
                  "doc toi nen the <a> vo nghia). Khong can mo tay.")
